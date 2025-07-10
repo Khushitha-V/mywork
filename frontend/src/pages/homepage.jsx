@@ -10,9 +10,10 @@ import WallCanvas from '../components/WallCanvas';
 const DEFAULT_DIMENSIONS = { length: 8, width: 8, height: 3 };
 const DEFAULT_ROOM = 'others';
 
-const Homepage = () => {
+const Homepage = ({ user, onLogout }) => {
   const [showDimensionModal, setShowDimensionModal] = useState(false);
   const [showPreviousModal, setShowPreviousModal] = useState(false);
+  const [currentRoomId, setCurrentRoomId] = useState(null);
   const [roomDimensions, setRoomDimensions] = useState(DEFAULT_DIMENSIONS);
   const [selectedRoom, setSelectedRoom] = useState(DEFAULT_ROOM);
   const [showImagePopup, setShowImagePopup] = useState(false);
@@ -123,11 +124,101 @@ const Homepage = () => {
     console.log('walls state:', walls);
   }, [walls]);
 
+  const saveCurrentRoom = async (roomName) => {
+    try {
+      const roomData = {
+        name: roomName || `Room ${new Date().toLocaleString()}`,
+        roomType: selectedRoom,
+        dimensions: roomDimensions,
+        wallColors: wallColors,
+        wallpapers: wallpapers,
+        wallCanvasData: wallCanvasData
+      };
+
+      const url = currentRoomId 
+        ? `http://localhost:5000/api/rooms/${currentRoomId}`
+        : 'http://localhost:5000/api/rooms';
+      
+      const method = currentRoomId ? 'PUT' : 'POST';
+
+      const response = await fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(roomData),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setCurrentRoomId(data.room.id);
+        alert(currentRoomId ? 'Room updated successfully!' : 'Room saved successfully!');
+      } else {
+        alert(data.error || 'Failed to save room');
+      }
+    } catch (err) {
+      alert('Network error. Please try again.');
+    }
+  };
+
+  const loadRoom = (room) => {
+    setRoomDimensions(room.dimensions);
+    setSelectedRoom(room.room_type || room.roomType);
+    setWallColors(room.wall_colors || room.wallColors);
+    setWallpapers(room.wallpapers || {});
+    setWallCanvasData(room.wall_canvas_data || room.wallCanvasData || {});
+    setCurrentRoomId(room.id);
+
+    // Update walls state based on loaded room
+    const newWalls = { ...walls };
+    Object.keys(newWalls).forEach(wallKey => {
+      const wallName = wallKey.charAt(0).toUpperCase() + wallKey.slice(1) + ' Wall';
+      if (room.wall_colors && room.wall_colors[wallName]) {
+        newWalls[wallKey].wallColor = room.wall_colors[wallName];
+      }
+      if (room.wallpapers && room.wallpapers[wallName]) {
+        newWalls[wallKey].wallpaper = room.wallpapers[wallName];
+      }
+    });
+    setWalls(newWalls);
+  };
+
+  const createNewRoom = () => {
+    setCurrentRoomId(null);
+    setRoomDimensions(DEFAULT_DIMENSIONS);
+    setSelectedRoom(DEFAULT_ROOM);
+    setWallColors({
+      'North Wall': '#b0b0b0',
+      'South Wall': '#b0b0b0',
+      'East Wall': '#8a7b94',
+      'West Wall': '#8a7b94',
+    });
+    setWallpapers({});
+    setWallCanvasData({});
+    setWalls({
+      north: { frames: [], wallColor: '#b0b0b0', wallpaper: null },
+      south: { frames: [], wallColor: '#b0b0b0', wallpaper: null },
+      east:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
+      west:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
+    });
+  };
+
   return (
     <div className="gradient-bg min-h-screen font-sans">
       <Header
         onSetDimensions={() => setShowDimensionModal(true)}
         onViewPrevious={() => setShowPreviousModal(true)}
+        onSaveRoom={() => {
+          const roomName = prompt('Enter room name:');
+          if (roomName !== null) {
+            saveCurrentRoom(roomName);
+          }
+        }}
+        onNewRoom={createNewRoom}
+        user={user}
+        onLogout={onLogout}
       />
       <div className="w-full min-h-[calc(100vh-100px)] px-1 md:px-2 pb-4 grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
         <SidebarLeft 
@@ -251,7 +342,10 @@ const Homepage = () => {
       )}
 
       {showPreviousModal && (
-        <PreviousRoomsModal onClose={() => setShowPreviousModal(false)} />
+        <PreviousRoomsModal 
+          onClose={() => setShowPreviousModal(false)} 
+          onLoadRoom={loadRoom}
+        />
       )}
     </div>
   );
