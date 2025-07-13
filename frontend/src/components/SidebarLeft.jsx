@@ -169,6 +169,12 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
   // Find the selected frame
   const selectedFrame = Array.isArray(frames) && selectedFrameId ? frames.find(f => f.id === selectedFrameId) : null;
 
+  // Handle frame resize from sidebar
+  const handleFrameResize = (newSize) => {
+    if (onResizeSelectedFrame) {
+      onResizeSelectedFrame(newSize);
+    }
+  };
   return (
     <div className="w-full md:col-span-3 h-auto md:h-[calc(100vh-140px)]">
       <div className="glasseffect rounded-2xl p-4 md:p-6 shadow-xl h-full overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 space-y-6">
@@ -389,18 +395,47 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
 
         {/* Frame Resize Slider */}
         {selectedFrame && onResizeSelectedFrame && (
-          <div className="mb-8 flex flex-col items-center">
-            <label className="block text-sm font-medium text-text-secondary mb-2">Resize Selected Frame</label>
-            <input
-              type="range"
-              min="40"
-              max="300"
-              value={selectedFrame.width}
-              onChange={e => onResizeSelectedFrame(parseInt(e.target.value, 10))}
-              className="w-32 rotate-[-90deg] mb-2"
-              style={{ height: '120px' }}
-            />
-            <div className="text-xs text-gray-500">Size: {selectedFrame.width} x {selectedFrame.height}</div>
+          <div className="mb-8">
+            <h3 className="text-lg font-semibold text-text-primary mb-4">Resize Selected Item</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-text-secondary mb-2">
+                  Size: {selectedFrame.width} x {selectedFrame.height}
+                </label>
+                <input
+                  type="range"
+                  min="40"
+                  max="300"
+                  value={selectedFrame.width}
+                  onChange={e => handleFrameResize(parseInt(e.target.value, 10))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>40px</span>
+                  <span>300px</span>
+                </div>
+              </div>
+              <div className="text-center">
+                <button
+                  onClick={() => handleFrameResize(100)}
+                  className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300 transition-colors mr-2"
+                >
+                  Small (100px)
+                </button>
+                <button
+                  onClick={() => handleFrameResize(150)}
+                  className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300 transition-colors mr-2"
+                >
+                  Medium (150px)
+                </button>
+                <button
+                  onClick={() => handleFrameResize(200)}
+                  className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-xs hover:bg-gray-300 transition-colors"
+                >
+                  Large (200px)
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

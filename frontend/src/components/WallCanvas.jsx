@@ -1,20 +1,17 @@
 import React, { useRef, useEffect, useState, forwardRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import Frame from './Frame';
 
 const WALL_WIDTH = 600;
 const WALL_HEIGHT = 300;
 const MIN_FRAME_SIZE = 40;
-const RESIZE_HANDLE_SIZE = 14;
+const RESIZE_HANDLE_SIZE = 12;
 
 const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpaper, selectedFrameId, onSelectedFrameChange, lockOtherFrames }, ref) => {
   const canvasRef = useRef();
   const [draggedOverFrameId, setDraggedOverFrameId] = useState(null);
-  const [dragState, setDragState] = useState(null); // { type: 'move'|'resize', frameId, offsetX, offsetY, origW, origH }
-  const [lastClickTime, setLastClickTime] = useState(0);
+  const [dragState, setDragState] = useState(null);
   const [hoveredFrameId, setHoveredFrameId] = useState(null);
-  // Remove: const [selectedFrameId, setSelectedFrameId] = useState(null);
-  // Use only the selectedFrameId prop and onSelectedFrameChange prop for selection logic.
+  const [isDragging, setIsDragging] = useState(false);
 
   // Ensure frames is always an array
   const safeFrames = Array.isArray(frames) ? frames : [];
@@ -35,12 +32,19 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    // Draw background
+    
+    // Clear canvas
     ctx.clearRect(0, 0, WALL_WIDTH, WALL_HEIGHT);
+    
+    // Draw background
     if (wallpaper) {
       const img = new window.Image();
       img.onload = () => {
         ctx.drawImage(img, 0, 0, WALL_WIDTH, WALL_HEIGHT);
+        drawFrames(ctx);
+      };
+      img.onerror = () => {
+        drawFallbackBackground(ctx);
         drawFrames(ctx);
       };
       img.src = wallpaper;
@@ -49,263 +53,224 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
       ctx.fillRect(0, 0, WALL_WIDTH, WALL_HEIGHT);
       drawFrames(ctx);
     } else {
-      ctx.fillStyle = '#f3f4f6'; // fallback gray
-      ctx.fillRect(0, 0, WALL_WIDTH, WALL_HEIGHT);
+      drawFallbackBackground(ctx);
       drawFrames(ctx);
     }
-    // eslint-disable-next-line
+
+    function drawFallbackBackground(ctx) {
+      ctx.fillStyle = '#f3f4f6';
+      ctx.fillRect(0, 0, WALL_WIDTH, WALL_HEIGHT);
+    }
+
     function drawFrames(ctx) {
-      // Add null check for frames
-      if (!safeFrames || !Array.isArray(safeFrames)) {
-        return;
-      }
+      if (!safeFrames || !Array.isArray(safeFrames)) return;
       
       safeFrames.forEach(frame => {
-        if (frame.shape === 'sticker') {
-          if (frame.image) {
-            const img = new window.Image();
-            img.src = frame.image;
-            // Draw image and border immediately if cached
-            if (img.complete) {
-              ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
-              if (frame.id === selectedFrameId) {
-                ctx.save();
-                ctx.strokeStyle = '#6366f1';
-                ctx.lineWidth = 4;
-                ctx.strokeRect(frame.x - 2, frame.y - 2, frame.width + 4, frame.height + 4);
-                ctx.restore();
-              }
-            } else {
-              img.onload = () => {
-                ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
-                if (frame.id === selectedFrameId) {
-                  ctx.save();
-                  ctx.strokeStyle = '#6366f1';
-                  ctx.lineWidth = 4;
-                  ctx.strokeRect(frame.x - 2, frame.y - 2, frame.width + 4, frame.height + 4);
-                  ctx.restore();
-                }
-              };
-            }
-          } else if (frame.id === selectedFrameId) {
-            // If no image, still show selection border
-            ctx.save();
-            ctx.strokeStyle = '#6366f1';
-            ctx.lineWidth = 4;
-            ctx.strokeRect(frame.x - 2, frame.y - 2, frame.width + 4, frame.height + 4);
-            ctx.restore();
-          }
-          return; // Skip the rest of the frame drawing logic for stickers
-        }
+        // Save context for each frame
+        ctx.save();
+        
         // Highlight if being dragged over
         if (frame.id === draggedOverFrameId) {
-          ctx.save();
           ctx.strokeStyle = '#fbbf24';
           ctx.lineWidth = 6;
           ctx.strokeRect(frame.x - 3, frame.y - 3, frame.width + 6, frame.height + 6);
-          ctx.restore();
         }
+        
         // Highlight if selected
         if (frame.id === selectedFrameId) {
-          ctx.save();
           ctx.strokeStyle = '#6366f1';
           ctx.lineWidth = 4;
           ctx.strokeRect(frame.x - 2, frame.y - 2, frame.width + 4, frame.height + 4);
-          ctx.restore();
         }
         
-        // Draw the frame shape
-        if (frame.shape === 'circle' || frame.shape === 'oval') {
-          ctx.save();
-          ctx.beginPath();
-          ctx.ellipse(frame.x + frame.width / 2, frame.y + frame.height / 2, frame.width / 2, frame.height / 2, 0, 0, 2 * Math.PI);
-          ctx.clip();
-          if (frame.image) {
-            const img = new window.Image();
-            img.src = frame.image;
-            const imgAspect = img.width / img.height;
-            const frameAspect = frame.width / frame.height;
-            let sx = 0, sy = 0, sw = img.width, sh = img.height;
-            if (imgAspect > frameAspect) {
-              sw = img.height * frameAspect;
-              sx = (img.width - sw) / 2;
-            } else {
-              sh = img.width / frameAspect;
-              sy = (img.height - sh) / 2;
-            }
-            const drawEllipseImage = () => {
-              ctx.drawImage(img, sx, sy, sw, sh, frame.x, frame.y, frame.width, frame.height);
-            };
-            if (img.complete) {
-              drawEllipseImage();
-            } else {
-              img.onload = drawEllipseImage;
-            }
-          } else {
-            ctx.fillStyle = '#fff';
-            ctx.fill();
-          }
-          ctx.restore();
-          // Draw border
-          ctx.save();
-          ctx.strokeStyle = frame.shape === 'circle' ? '#60a5fa' : '#a78bfa';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.ellipse(frame.x + frame.width / 2, frame.y + frame.height / 2, frame.width / 2, frame.height / 2, 0, 0, 2 * Math.PI);
-          ctx.stroke();
-          ctx.restore();
-        } else if (frame.shape === 'square') {
-          ctx.save();
-          if (frame.image) {
-            const img = new window.Image();
-            img.onload = () => {
-              ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
-            };
-            img.src = frame.image;
-          } else {
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(frame.x, frame.y, frame.width, frame.height);
-          }
-          ctx.restore();
-          // Draw border
-          ctx.save();
-          ctx.strokeStyle = '#34d399';
-          ctx.lineWidth = 4;
-          ctx.strokeRect(frame.x, frame.y, frame.width, frame.height);
-          ctx.restore();
-        } else { // rectangle or fallback
-          ctx.save();
-          if (frame.image) {
-            const img = new window.Image();
-            img.onload = () => {
-              ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
-            };
-            img.src = frame.image;
-          } else {
-            ctx.fillStyle = '#fff';
-            ctx.fillRect(frame.x, frame.y, frame.width, frame.height);
-          }
-          ctx.restore();
-          // Draw border
-          ctx.save();
-          ctx.strokeStyle = '#60a5fa';
-          ctx.lineWidth = 4;
-          ctx.strokeRect(frame.x, frame.y, frame.width, frame.height);
-          ctx.restore();
+        // Draw frame based on shape
+        if (frame.shape === 'sticker') {
+          drawSticker(ctx, frame);
+        } else if (frame.shape === 'circle' || frame.shape === 'oval') {
+          drawEllipseFrame(ctx, frame);
+        } else {
+          drawRectangularFrame(ctx, frame);
         }
         
-        // Draw resize handles only for selected frame
-        // if (frame.id === selectedFrameId) {
-        //   drawResizeHandles(ctx, frame);
-        // }
+        ctx.restore();
       });
     }
-    
-    // Remove drawResizeHandles function entirely
+
+    function drawSticker(ctx, frame) {
+      if (frame.image) {
+        const img = new window.Image();
+        img.onload = () => {
+          ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
+        };
+        img.onerror = () => {
+          // Draw placeholder for broken sticker
+          ctx.fillStyle = '#e5e7eb';
+          ctx.fillRect(frame.x, frame.y, frame.width, frame.height);
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '12px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText('Sticker', frame.x + frame.width/2, frame.y + frame.height/2);
+        };
+        img.src = frame.image;
+      }
+    }
+
+    function drawEllipseFrame(ctx, frame) {
+      ctx.beginPath();
+      ctx.ellipse(
+        frame.x + frame.width / 2, 
+        frame.y + frame.height / 2, 
+        frame.width / 2, 
+        frame.height / 2, 
+        0, 0, 2 * Math.PI
+      );
+      ctx.clip();
+      
+      if (frame.image) {
+        const img = new window.Image();
+        img.onload = () => {
+          ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
+        };
+        img.src = frame.image;
+      } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      }
+      
+      // Draw border
+      ctx.restore();
+      ctx.save();
+      ctx.strokeStyle = frame.shape === 'circle' ? '#60a5fa' : '#a78bfa';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(
+        frame.x + frame.width / 2, 
+        frame.y + frame.height / 2, 
+        frame.width / 2, 
+        frame.height / 2, 
+        0, 0, 2 * Math.PI
+      );
+      ctx.stroke();
+    }
+
+    function drawRectangularFrame(ctx, frame) {
+      if (frame.image) {
+        const img = new window.Image();
+        img.onload = () => {
+          ctx.drawImage(img, frame.x, frame.y, frame.width, frame.height);
+        };
+        img.src = frame.image;
+      } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(frame.x, frame.y, frame.width, frame.height);
+      }
+      
+      // Draw border
+      const borderColor = frame.shape === 'square' ? '#34d399' : '#60a5fa';
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 4;
+      ctx.strokeRect(frame.x, frame.y, frame.width, frame.height);
+    }
   }, [wallColor, wallpaper, safeFrames, draggedOverFrameId, selectedFrameId]);
 
   function getFrameAt(x, y) {
     if (!safeFrames || !Array.isArray(safeFrames)) return null;
-    return safeFrames.find(f => x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height);
+    // Check from top to bottom (last drawn = on top)
+    for (let i = safeFrames.length - 1; i >= 0; i--) {
+      const frame = safeFrames[i];
+      if (x >= frame.x && x <= frame.x + frame.width && 
+          y >= frame.y && y <= frame.y + frame.height) {
+        return frame;
+      }
+    }
+    return null;
   }
 
-  function getResizeHandleAt(x, y, onlyFrameId = null) {
+  function getResizeHandleAt(x, y, frameId) {
     if (!safeFrames || !Array.isArray(safeFrames)) return null;
     
-    for (const frame of safeFrames) {
-      if (onlyFrameId && frame.id !== onlyFrameId) continue;
-      
-      const handleSize = RESIZE_HANDLE_SIZE;
-      const handles = [
-        // Corners
-        { x: frame.x, y: frame.y, type: 'corner', corner: 'nw', cursor: 'nw-resize' },
-        { x: frame.x + frame.width - handleSize, y: frame.y, type: 'corner', corner: 'ne', cursor: 'ne-resize' },
-        { x: frame.x, y: frame.y + frame.height - handleSize, type: 'corner', corner: 'sw', cursor: 'sw-resize' },
-        { x: frame.x + frame.width - handleSize, y: frame.y + frame.height - handleSize, type: 'corner', corner: 'se', cursor: 'se-resize' },
-        // Edges
-        { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y, type: 'edge', edge: 'n', cursor: 'n-resize' },
-        { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y + frame.height - handleSize, type: 'edge', edge: 's', cursor: 's-resize' },
-        { x: frame.x, y: frame.y + frame.height / 2 - handleSize / 2, type: 'edge', edge: 'w', cursor: 'w-resize' },
-        { x: frame.x + frame.width - handleSize, y: frame.y + frame.height / 2 - handleSize / 2, type: 'edge', edge: 'e', cursor: 'e-resize' },
-      ];
-      
-      for (const handle of handles) {
-        if (x >= handle.x && x <= handle.x + handleSize && y >= handle.y && y <= handle.y + handleSize) {
-          return { frame, handle };
-        }
+    const frame = safeFrames.find(f => f.id === frameId);
+    if (!frame) return null;
+    
+    const handleSize = RESIZE_HANDLE_SIZE;
+    const handles = [
+      // Corners
+      { x: frame.x + frame.width - handleSize, y: frame.y + frame.height - handleSize, type: 'corner', corner: 'se', cursor: 'se-resize' },
+      { x: frame.x, y: frame.y, type: 'corner', corner: 'nw', cursor: 'nw-resize' },
+      { x: frame.x + frame.width - handleSize, y: frame.y, type: 'corner', corner: 'ne', cursor: 'ne-resize' },
+      { x: frame.x, y: frame.y + frame.height - handleSize, type: 'corner', corner: 'sw', cursor: 'sw-resize' },
+      // Edges
+      { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y, type: 'edge', edge: 'n', cursor: 'n-resize' },
+      { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y + frame.height - handleSize, type: 'edge', edge: 's', cursor: 's-resize' },
+      { x: frame.x, y: frame.y + frame.height / 2 - handleSize / 2, type: 'edge', edge: 'w', cursor: 'w-resize' },
+      { x: frame.x + frame.width - handleSize, y: frame.y + frame.height / 2 - handleSize / 2, type: 'edge', edge: 'e', cursor: 'e-resize' },
+    ];
+    
+    for (const handle of handles) {
+      if (x >= handle.x && x <= handle.x + handleSize && 
+          y >= handle.y && y <= handle.y + handleSize) {
+        return { frame, handle };
       }
     }
     return null;
   }
 
   const handleMouseDown = (e) => {
+    e.preventDefault();
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    console.log('Mouse down at:', x, y);
-    console.log('Safe frames:', safeFrames);
-    console.log('Current drag state:', dragState);
+    setIsDragging(false);
     
     // Check resize handle first (only for selected frame)
-    let resizeInfo = null;
     if (selectedFrameId) {
-      resizeInfo = getResizeHandleAt(x, y, selectedFrameId);
-    }
-    if (resizeInfo) {
-      console.log('Resize handle clicked');
-      setDragState({
-        type: 'resize',
-        frameId: resizeInfo.frame.id,
-        startX: x,
-        startY: y,
-        origW: resizeInfo.frame.width,
-        origH: resizeInfo.frame.height,
-        origX: resizeInfo.frame.x,
-        origY: resizeInfo.frame.y,
-        handle: resizeInfo.handle
-      });
-      return;
+      const resizeInfo = getResizeHandleAt(x, y, selectedFrameId);
+      if (resizeInfo) {
+        setDragState({
+          type: 'resize',
+          frameId: resizeInfo.frame.id,
+          startX: x,
+          startY: y,
+          origW: resizeInfo.frame.width,
+          origH: resizeInfo.frame.height,
+          origX: resizeInfo.frame.x,
+          origY: resizeInfo.frame.y,
+          handle: resizeInfo.handle
+        });
+        return;
+      }
     }
     
-    // Check if clicking on any frame (selected or not)
+    // Check if clicking on any frame
     const clickedFrame = getFrameAt(x, y);
-    console.log('Clicked frame:', clickedFrame);
     
     // If lockOtherFrames is true, only allow selecting the selected frame
     if (lockOtherFrames && clickedFrame && clickedFrame.id !== selectedFrameId) {
-      // Do not allow selecting or moving other frames
       return;
     }
     
     if (clickedFrame) {
-      console.log('Frame clicked, starting movement');
       // Select the frame
       if (onSelectedFrameChange) {
         onSelectedFrameChange(clickedFrame.id);
-      } else {
-        // setSelectedFrameId(clickedFrame.id); // This line is removed as per the edit hint
       }
       
-      // Start moving the frame immediately
-      const newDragState = {
+      // Start moving the frame
+      setDragState({
         type: 'move',
         frameId: clickedFrame.id,
         offsetX: x - clickedFrame.x,
         offsetY: y - clickedFrame.y,
-        origW: clickedFrame.width,
-        origH: clickedFrame.height
-      };
-      console.log('Setting drag state:', newDragState);
-      setDragState(newDragState);
+        startX: x,
+        startY: y
+      });
       return;
     }
     
     // If not clicking on any frame, deselect
     if (onSelectedFrameChange) {
       onSelectedFrameChange(null);
-    } else {
-      // setSelectedFrameId(null); // This line is removed as per the edit hint
     }
   };
 
@@ -316,40 +281,48 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     
     // Update cursor and hovered frame
     if (!dragState) {
-      const resizeInfo = getResizeHandleAt(x, y);
-      if (resizeInfo) {
-        canvasRef.current.style.cursor = resizeInfo.handle.cursor;
-        setHoveredFrameId(null);
-      } else {
-        const frame = getFrameAt(x, y);
-        if (frame) {
-          canvasRef.current.style.cursor = 'move';
-          setHoveredFrameId(frame.id);
-        } else {
-          canvasRef.current.style.cursor = 'default';
+      if (selectedFrameId) {
+        const resizeInfo = getResizeHandleAt(x, y, selectedFrameId);
+        if (resizeInfo) {
+          canvasRef.current.style.cursor = resizeInfo.handle.cursor;
           setHoveredFrameId(null);
+          return;
         }
+      }
+      
+      const frame = getFrameAt(x, y);
+      if (frame) {
+        canvasRef.current.style.cursor = 'move';
+        setHoveredFrameId(frame.id);
+      } else {
+        canvasRef.current.style.cursor = 'default';
+        setHoveredFrameId(null);
       }
       return;
     }
     
-    console.log('Mouse move with drag state:', dragState);
-    console.log('Mouse position:', x, y);
+    // Check if we've moved enough to consider it a drag
+    if (!isDragging && dragState) {
+      const deltaX = Math.abs(x - dragState.startX);
+      const deltaY = Math.abs(y - dragState.startY);
+      if (deltaX > 3 || deltaY > 3) {
+        setIsDragging(true);
+      }
+    }
+    
+    if (!isDragging) return;
     
     setFrames(prevFrames => {
       const currentFrames = Array.isArray(prevFrames) ? prevFrames : [];
-      console.log('Current frames before update:', currentFrames);
       
       return currentFrames.map(f => {
         if (f.id !== dragState.frameId) return f;
         
         if (dragState.type === 'move') {
-          // Clamp to wall
+          // Calculate new position
           let newX = Math.max(0, Math.min(x - dragState.offsetX, WALL_WIDTH - f.width));
           let newY = Math.max(0, Math.min(y - dragState.offsetY, WALL_HEIGHT - f.height));
-          console.log('Moving frame to:', newX, newY);
-          console.log('Frame being moved:', f);
-          // Allow all frame types (including stickers) to move
+          
           return { ...f, x: newX, y: newY };
         } else if (dragState.type === 'resize') {
           const handle = dragState.handle;
@@ -359,7 +332,8 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
           let newH = dragState.origH;
           const dx = x - dragState.startX;
           const dy = y - dragState.startY;
-          // Corners
+          
+          // Handle resize based on corner/edge
           if (handle.type === 'corner') {
             switch (handle.corner) {
               case 'nw':
@@ -401,13 +375,15 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
                 break;
             }
           }
+          
           // Enforce minimum size
           newW = Math.max(MIN_FRAME_SIZE, newW);
           newH = Math.max(MIN_FRAME_SIZE, newH);
+          
           // Clamp position so frame stays in canvas
           newX = Math.max(0, Math.min(newX, WALL_WIDTH - newW));
           newY = Math.max(0, Math.min(newY, WALL_HEIGHT - newH));
-          console.log('Resizing:', { newX, newY, newW, newH });
+          
           return { ...f, x: newX, y: newY, width: newW, height: newH };
         }
         return f;
@@ -417,7 +393,18 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
 
   const handleMouseUp = (e) => {
     setDragState(null);
+    setIsDragging(false);
+    
     // Reset cursor
+    if (canvasRef.current) {
+      canvasRef.current.style.cursor = 'default';
+    }
+  };
+
+  const handleMouseLeave = (e) => {
+    setHoveredFrameId(null);
+    setDragState(null);
+    setIsDragging(false);
     if (canvasRef.current) {
       canvasRef.current.style.cursor = 'default';
     }
@@ -431,40 +418,44 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    // Ensure frames is an array
     const currentFrames = Array.isArray(frames) ? frames : [];
     
     // Check for sticker image drop
     const stickerImageUrl = e.dataTransfer.getData('sticker-image-url');
     if (stickerImageUrl) {
-      setFrames([
-        ...currentFrames,
-        {
-          id: Date.now() + Math.random(),
-          x: Math.max(0, Math.min(x - 60, WALL_WIDTH - 120)),
-          y: Math.max(0, Math.min(y - 60, WALL_HEIGHT - 120)),
-          width: 120,
-          height: 120,
-          image: stickerImageUrl,
-          shape: 'sticker',
-        },
-      ]);
+      const newSticker = {
+        id: uuidv4(),
+        x: Math.max(0, Math.min(x - 60, WALL_WIDTH - 120)),
+        y: Math.max(0, Math.min(y - 60, WALL_HEIGHT - 120)),
+        width: 120,
+        height: 120,
+        image: stickerImageUrl,
+        shape: 'sticker',
+      };
+      setFrames([...currentFrames, newSticker]);
+      if (onSelectedFrameChange) {
+        onSelectedFrameChange(newSticker.id);
+      }
       return;
     }
+    
     // Check for managed image drop
     const managedImageUrl = e.dataTransfer.getData('managed-image-url');
     if (managedImageUrl) {
       const frame = getFrameAt(x, y);
-      if (frame && frame.shape !== 'sticker') { // Only allow replacing if not a sticker
+      if (frame && frame.shape !== 'sticker') {
         setFrames(currentFrames.map(f => f.id === frame.id ? { ...f, image: managedImageUrl } : f));
       }
       return;
     }
-    // Otherwise, handle frame drop as before
+    
+    // Handle frame drop
     const frameType = e.dataTransfer.getData('frameType');
     if (!frameType) return;
+    
     let shape = 'rectangle';
     let width = 120, height = 120;
+    
     if (frameType === 'square') {
       shape = 'square'; width = 100; height = 100;
     } else if (frameType === 'circle') {
@@ -474,19 +465,22 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     } else if (frameType === 'rectangle') {
       shape = 'rectangle'; width = 140; height = 90;
     }
-    setFrames([
-      ...currentFrames,
-      {
-        id: Date.now() + Math.random(),
-        x: Math.max(0, Math.min(x - width / 2, WALL_WIDTH - width)),
-        y: Math.max(0, Math.min(y - height / 2, WALL_HEIGHT - height)),
-        width,
-        height,
-        image: null,
-        style: frameType,
-        shape,
-      },
-    ]);
+    
+    const newFrame = {
+      id: uuidv4(),
+      x: Math.max(0, Math.min(x - width / 2, WALL_WIDTH - width)),
+      y: Math.max(0, Math.min(y - height / 2, WALL_HEIGHT - height)),
+      width,
+      height,
+      image: null,
+      style: frameType,
+      shape,
+    };
+    
+    setFrames([...currentFrames, newFrame]);
+    if (onSelectedFrameChange) {
+      onSelectedFrameChange(newFrame.id);
+    }
   };
 
   const handleDragOver = (e) => {
@@ -507,112 +501,11 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     setDraggedOverFrameId(null);
   };
 
-  // Add image frame
-  const handleAddFrame = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const url = URL.createObjectURL(file);
+  const handleDeleteFrame = (frameId) => {
     const currentFrames = Array.isArray(frames) ? frames : [];
-    setFrames([
-      ...currentFrames,
-      {
-        id: Date.now() + Math.random(),
-        x: 50,
-        y: 50,
-        width: 120,
-        height: 120,
-        image: url,
-      },
-    ]);
-    e.target.value = '';
-  };
-
-  const handleUpdateFrame = (id, newProps) => {
-    const currentFrames = Array.isArray(frames) ? frames : [];
-    setFrames(currentFrames.map(f => f.id === id ? { ...f, ...newProps } : f));
-  };
-
-  let lastDeleteTime = useRef(0);
-  const deleteLockRef = useRef(false);
-
-  const handleDeleteFrame = (id) => {
-    if (deleteLockRef.current) return; // Prevent multiple deletes
-    const currentFrames = Array.isArray(frames) ? frames : [];
-    // Only delete if the frame is selected and not a sticker
-    const frameToDelete = currentFrames.find(f => f.id === id);
-    if (!frameToDelete) return;
-    if (frameToDelete.shape === 'sticker') return; // Do not allow deleting stickers
-    if (selectedFrameId !== id) return; // Only allow deleting the selected frame
-    setFrames(currentFrames.filter(f => f.id !== id));
-    if (onSelectedFrameChange) onSelectedFrameChange(null); // Clear selection after delete
-    deleteLockRef.current = true; // Lock further deletes until selection changes
-  };
-
-  // Add a function to resize the selected frame from the sidebar
-  const handleSidebarResize = (newSize) => {
-    if (!selectedFrameId) return;
-    setFrames(prevFrames => prevFrames.map(f => f.id === selectedFrameId ? { ...f, width: newSize, height: newSize } : f));
-  };
-
-  // Remove onSelectedFrameResize prop and related useEffect
-
-  // Double-tap support for mobile
-  const lastTapRef = useRef(0);
-
-  // Handle double-click (desktop)
-  const handleDoubleClick = (e) => {
-    if (!selectedFrameId) return; // Only allow if a frame is selected
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const clickedFrame = getFrameAt(x, y);
-    if (clickedFrame && selectedFrameId === clickedFrame.id) {
-      // Only allow delete if not a sticker and is selected
-      if (clickedFrame.shape !== 'sticker') {
-        if (window.confirm('Are you sure you want to delete this frame?')) {
-          handleDeleteFrame(clickedFrame.id);
-        }
-      }
-    }
-  };
-
-  // Handle double-tap (mobile)
-  const handleTouchEnd = (e) => {
-    if (!selectedFrameId) return; // Only allow if a frame is selected
-    const now = Date.now();
-    const TAP_DELAY = 300;
-    if (lastTapRef.current && (now - lastTapRef.current) < TAP_DELAY) {
-      // Double-tap detected
-      // Get touch position
-      const touch = e.changedTouches[0];
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      const tappedFrame = getFrameAt(x, y);
-      if (tappedFrame && selectedFrameId === tappedFrame.id) {
-        // Only allow delete if not a sticker and is selected
-        if (tappedFrame.shape !== 'sticker') {
-          if (window.confirm('Are you sure you want to delete this frame?')) {
-            handleDeleteFrame(tappedFrame.id);
-          }
-        }
-      }
-      lastTapRef.current = 0; // reset
-    } else {
-      lastTapRef.current = now;
-    }
-  };
-
-  // Wrap onSelectedFrameChange to reset delete lock
-  const handleSelectedFrameChange = (id) => {
-    deleteLockRef.current = false; // Unlock delete when selection changes
-    if (onSelectedFrameChange) onSelectedFrameChange(id);
-  };
-
-  const handleMouseLeave = (e) => {
-    setHoveredFrameId(null);
-    if (canvasRef.current) {
-      canvasRef.current.style.cursor = 'default';
+    setFrames(currentFrames.filter(f => f.id !== frameId));
+    if (selectedFrameId === frameId && onSelectedFrameChange) {
+      onSelectedFrameChange(null);
     }
   };
 
@@ -635,69 +528,77 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseLeave}
-        onDoubleClick={handleDoubleClick}
-        onTouchEnd={handleTouchEnd}
       />
-      {/* Delete button is only shown on hover of the selected frame/sticker. Deletion is only possible via this button. Double-click/tap does NOT delete. */}
-      {Array.isArray(safeFrames) && selectedFrameId && (() => {
+      
+      {/* Resize handles for selected frame */}
+      {selectedFrameId && (() => {
         const frame = safeFrames.find(f => f.id === selectedFrameId);
         if (!frame) return null;
+        
+        const handleSize = RESIZE_HANDLE_SIZE;
+        const handles = [
+          { x: frame.x + frame.width - handleSize, y: frame.y + frame.height - handleSize, cursor: 'se-resize' },
+          { x: frame.x, y: frame.y, cursor: 'nw-resize' },
+          { x: frame.x + frame.width - handleSize, y: frame.y, cursor: 'ne-resize' },
+          { x: frame.x, y: frame.y + frame.height - handleSize, cursor: 'sw-resize' },
+          { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y, cursor: 'n-resize' },
+          { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y + frame.height - handleSize, cursor: 's-resize' },
+          { x: frame.x, y: frame.y + frame.height / 2 - handleSize / 2, cursor: 'w-resize' },
+          { x: frame.x + frame.width - handleSize, y: frame.y + frame.height / 2 - handleSize / 2, cursor: 'e-resize' },
+        ];
+        
+        return (
+          <div className="absolute pointer-events-none" style={{ left: 0, top: 0 }}>
+            {handles.map((handle, index) => (
+              <div
+                key={index}
+                className="absolute bg-blue-500 border-2 border-white rounded-sm pointer-events-auto"
+                style={{
+                  left: `${handle.x}px`,
+                  top: `${handle.y}px`,
+                  width: `${handleSize}px`,
+                  height: `${handleSize}px`,
+                  cursor: handle.cursor,
+                  zIndex: 10
+                }}
+              />
+            ))}
+          </div>
+        );
+      })()}
+      
+      {/* Delete button for hovered/selected frames */}
+      {(hoveredFrameId || selectedFrameId) && (() => {
+        const frameId = hoveredFrameId || selectedFrameId;
+        const frame = safeFrames.find(f => f.id === frameId);
+        if (!frame) return null;
+        
         return (
           <div
-            className="frame-container"
+            className="absolute pointer-events-none"
             style={{
-              position: 'absolute',
-              left: `${frame.x}px`,
-              top: `${frame.y}px`,
-              width: `${frame.width}px`,
-              height: `${frame.height}px`,
-              pointerEvents: 'none',
+              left: `${frame.x + frame.width - 12}px`,
+              top: `${frame.y - 12}px`,
+              zIndex: 20
             }}
           >
             <button
-              className="delete-btn-on-hover"
-              style={{
-                position: 'absolute',
-                right: '-8px',
-                top: '-8px',
-                width: '24px',
-                height: '24px',
-                background: '#ef4444',
-                color: 'white',
-                borderRadius: '50%',
-                border: 'none',
-                display: 'none',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '16px',
-                zIndex: 20,
-                pointerEvents: 'auto',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
-                cursor: 'pointer'
-              }}
-              title="Delete frame"
-              tabIndex={-1}
-              onClick={e => {
+              className="w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center text-sm font-bold shadow-lg pointer-events-auto transition-colors"
+              onClick={(e) => {
                 e.stopPropagation();
-                if (e.type === 'click') {
-                  if (window.confirm('Are you sure you want to delete this frame?')) {
-                    handleDeleteFrame(frame.id);
-                  }
+                if (window.confirm('Are you sure you want to delete this item?')) {
+                  handleDeleteFrame(frameId);
                 }
               }}
+              title="Delete"
             >
               ×
             </button>
           </div>
         );
       })()}
-      <style>{`
-        .frame-container:hover .delete-btn-on-hover { 
-          display: flex !important; 
-        }
-      `}</style>
     </div>
   );
 });
 
-export default WallCanvas; 
+export default WallCanvas;

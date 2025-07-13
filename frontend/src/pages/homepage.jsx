@@ -42,6 +42,7 @@ const Homepage = ({ user, onLogout }) => {
   // Add a function to resize the selected frame in the current wall
   const resizeSelectedFrame = (newSize) => {
     if (!editingWall || !selectedFrameId) return;
+    
     setWalls(prev => {
       const key = getWallKey(editingWall);
       return {
@@ -50,12 +51,20 @@ const Homepage = ({ user, onLogout }) => {
           ...prev[key],
           frames: (Array.isArray(prev[key].frames) ? prev[key].frames : []).map(f => {
             if (f.id !== selectedFrameId) return f;
-            // If square or circle, keep width=height
+            
+            // For square or circle, keep width=height
             if (f.shape === 'square' || f.shape === 'circle') {
               return { ...f, width: newSize, height: newSize };
             }
+            
+            // For stickers, maintain aspect ratio
+            if (f.shape === 'sticker') {
+              const aspect = f.aspectRatio || (f.width / f.height) || 1;
+              return { ...f, width: newSize, height: Math.round(newSize / aspect) };
+            }
+            
             // For rectangle/oval, preserve aspect ratio
-            const aspect = f.aspectRatio || (f.width / f.height) || 1;
+            const aspect = f.aspectRatio || (f.width / f.height) || 1.4; // Default rectangle ratio
             return { ...f, width: newSize, height: Math.round(newSize / aspect) };
           })
         }
