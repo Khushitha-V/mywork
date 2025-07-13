@@ -35,13 +35,7 @@ const Frame = ({ x, y, width, height, image, onUpdate, onDelete, bounds, style }
       minWidth={60}
       minHeight={60}
       onDragStop={(e, d) => onUpdate({ x: d.x, y: d.y })}
-      onResizeStop={(e, direction, ref, delta, position) => {
-        onUpdate({
-          width: parseInt(ref.style.width, 10),
-          height: parseInt(ref.style.height, 10),
-          ...position,
-        });
-      }}
+      enableResizing={false}
       style={{ zIndex: 2 }}
     >
       <div className={`relative w-full h-full rounded-lg shadow-lg border-4 border-white overflow-hidden bg-white flex items-center justify-center ${!image ? 'border-dashed border-2 border-gray-300' : ''}`}>

@@ -35,7 +35,33 @@ const Homepage = ({ user, onLogout }) => {
     east:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
     west:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
   });
+  const [showRoomPopup, setShowRoomPopup] = useState(false);
   const wallCanvasRef = useRef();
+  const [selectedFrameId, setSelectedFrameId] = useState(null);
+  const [lockOtherFrames, setLockOtherFrames] = useState(false);
+  // Add a function to resize the selected frame in the current wall
+  const resizeSelectedFrame = (newSize) => {
+    if (!editingWall || !selectedFrameId) return;
+    setWalls(prev => {
+      const key = getWallKey(editingWall);
+      return {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          frames: (Array.isArray(prev[key].frames) ? prev[key].frames : []).map(f => {
+            if (f.id !== selectedFrameId) return f;
+            // If square or circle, keep width=height
+            if (f.shape === 'square' || f.shape === 'circle') {
+              return { ...f, width: newSize, height: newSize };
+            }
+            // For rectangle/oval, preserve aspect ratio
+            const aspect = f.aspectRatio || (f.width / f.height) || 1;
+            return { ...f, width: newSize, height: Math.round(newSize / aspect) };
+          })
+        }
+      };
+    });
+  };
 
   // Helper function to convert wall name to key
   const getWallKey = (wallName) => {
@@ -95,7 +121,12 @@ const Homepage = ({ user, onLogout }) => {
         ...prev,
         [key]: {
           ...prev[key],
-          frames,
+          frames: (Array.isArray(frames) ? frames : []).map(f => {
+            if (f.aspectRatio === undefined && f.width && f.height) {
+              return { ...f, aspectRatio: f.width / f.height };
+            }
+            return f;
+          })
         },
       };
     });
@@ -188,21 +219,238 @@ const Homepage = ({ user, onLogout }) => {
   const createNewRoom = () => {
     setCurrentRoomId(null);
     setRoomDimensions(DEFAULT_DIMENSIONS);
-    setSelectedRoom(DEFAULT_ROOM);
+    setSelectedRoom(null); // Set to null to force room selection
+    setShowRoomPopup(true); // Open the room selection popup
     setWallColors({
-      'North Wall': '#b0b0b0',
-      'South Wall': '#b0b0b0',
-      'East Wall': '#8a7b94',
-      'West Wall': '#8a7b94',
+      'North Wall': '#ffffff',
+      'South Wall': '#ffffff',
+      'East Wall': '#ffffff',
+      'West Wall': '#ffffff',
     });
     setWallpapers({});
     setWallCanvasData({});
     setWalls({
-      north: { frames: [], wallColor: '#b0b0b0', wallpaper: null },
-      south: { frames: [], wallColor: '#b0b0b0', wallpaper: null },
-      east:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
-      west:  { frames: [], wallColor: '#8a7b94', wallpaper: null },
+      north: { frames: [], wallColor: '#ffffff', wallpaper: null },
+      south: { frames: [], wallColor: '#ffffff', wallpaper: null },
+      east:  { frames: [], wallColor: '#ffffff', wallpaper: null },
+      west:  { frames: [], wallColor: '#ffffff', wallpaper: null },
     });
+  };
+
+  // Only clear the current room, do not change selectedRoom or showRoomPopup
+  const resetCurrentRoom = () => {
+    setWallColors({
+      'North Wall': '#ffffff',
+      'South Wall': '#ffffff',
+      'East Wall': '#ffffff',
+      'West Wall': '#ffffff',
+    });
+    setWallpapers({});
+    setWallCanvasData({});
+    setWalls({
+      north: { frames: [], wallColor: '#ffffff', wallpaper: null },
+      south: { frames: [], wallColor: '#ffffff', wallpaper: null },
+      east:  { frames: [], wallColor: '#ffffff', wallpaper: null },
+      west:  { frames: [], wallColor: '#ffffff', wallpaper: null },
+    });
+  };
+
+  // Add a handler to select room and close popup
+  const handleRoomSelect = (roomType) => {
+    setSelectedRoom(roomType);
+    setShowRoomPopup(false);
+  };
+
+  // Helper: Check if a wall is edited
+  const isWallEdited = (wallName) => {
+    const wallKey = getWallKey(wallName);
+    const wall = walls[wallKey];
+    // Default colors for your app (adjust if needed)
+    const defaultColors = ['#b0b0b0', '#8a7b94', '#ffffff'];
+    const hasCustomColor = wall.wallColor && !defaultColors.includes(wall.wallColor.toLowerCase());
+    const hasWallpaper = !!wall.wallpaper;
+    const hasFrames = Array.isArray(wall.frames) && wall.frames.length > 0;
+    return hasCustomColor || hasWallpaper || hasFrames;
+  };
+
+  // Function to download all designed walls (only edited walls)
+  const downloadAllWalls = () => {
+    const wallNames = ['North Wall', 'South Wall', 'East Wall', 'West Wall'];
+    const editedWalls = wallNames.filter(isWallEdited);
+    if (editedWalls.length === 0) {
+      alert('No walls have been designed yet!');
+      return;
+    }
+    // Calculate grid size
+    const cols = Math.min(2, editedWalls.length);
+    const rows = Math.ceil(editedWalls.length / cols);
+    const wallWidth = 600;
+    const wallHeight = 300;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    canvas.width = wallWidth * cols;
+    canvas.height = wallHeight * rows;
+    ctx.fillStyle = '#f8f9fa';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Function to draw a single wall
+    const drawWall = (wallName, x, y) => {
+      return new Promise((resolve) => {
+        const wallKey = getWallKey(wallName);
+        const wall = walls[wallKey];
+        if (wall.wallpaper) {
+          const img = new window.Image();
+          img.onload = () => {
+            ctx.drawImage(img, x, y, wallWidth, wallHeight);
+            drawFrames(wallName, x, y).then(resolve);
+          };
+          img.src = wall.wallpaper;
+        } else if (wall.wallColor) {
+          ctx.fillStyle = wall.wallColor;
+          ctx.fillRect(x, y, wallWidth, wallHeight);
+          drawFrames(wallName, x, y).then(resolve);
+        } else {
+          ctx.fillStyle = '#f3f4f6';
+          ctx.fillRect(x, y, wallWidth, wallHeight);
+          drawFrames(wallName, x, y).then(resolve);
+        }
+      });
+    };
+    // Function to draw frames on a wall
+    const drawFrames = (wallName, offsetX, offsetY) => {
+      return new Promise((resolve) => {
+        const wallKey = getWallKey(wallName);
+        const wall = walls[wallKey];
+        if (wall.frames && Array.isArray(wall.frames) && wall.frames.length > 0) {
+          let loadedFrames = 0;
+          const totalFrames = wall.frames.filter(frame => frame.image).length;
+          if (totalFrames === 0) {
+            resolve();
+            return;
+          }
+          wall.frames.forEach(frame => {
+            if (frame.image) {
+              const img = new window.Image();
+              img.onload = () => {
+                ctx.drawImage(img, offsetX + frame.x, offsetY + frame.y, frame.width, frame.height);
+                loadedFrames++;
+                if (loadedFrames === totalFrames) {
+                  resolve();
+                }
+              };
+              img.src = frame.image;
+            }
+          });
+        } else {
+          resolve();
+        }
+      });
+    };
+    // Draw all edited walls in a grid and wait for all to complete
+    Promise.all(editedWalls.map((wallName, index) => {
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      const x = col * wallWidth;
+      const y = row * wallHeight;
+      // Add wall label
+      ctx.fillStyle = '#374151';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(wallName, x + wallWidth / 2, y + 25);
+      return drawWall(wallName, x, y + 30);
+    })).then(() => {
+      // Download the combined image after all walls are drawn
+      const dataUrl = canvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `room-design-${new Date().toISOString().split('T')[0]}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
+  };
+
+  // Function to download a single wall
+  const downloadSingleWall = (wallName) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    const wallWidth = 600;
+    const wallHeight = 300;
+    canvas.width = wallWidth;
+    canvas.height = wallHeight;
+    
+    const wallKey = getWallKey(wallName);
+    const wall = walls[wallKey];
+    
+    // Draw wall background
+    if (wall.wallpaper) {
+      const img = new window.Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, wallWidth, wallHeight);
+        drawFrames(wallName, 0, 0).then(() => {
+          downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
+        });
+      };
+      img.src = wall.wallpaper;
+    } else if (wall.wallColor) {
+      ctx.fillStyle = wall.wallColor;
+      ctx.fillRect(0, 0, wallWidth, wallHeight);
+      drawFrames(wallName, 0, 0).then(() => {
+        downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
+      });
+    } else {
+      ctx.fillStyle = '#f3f4f6';
+      ctx.fillRect(0, 0, wallWidth, wallHeight);
+      drawFrames(wallName, 0, 0).then(() => {
+        downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
+      });
+    }
+    
+    // Function to draw frames on a wall
+    const drawFrames = (wallName, offsetX, offsetY) => {
+      return new Promise((resolve) => {
+        const wallKey = getWallKey(wallName);
+        const wall = walls[wallKey];
+        
+        if (wall.frames && Array.isArray(wall.frames) && wall.frames.length > 0) {
+          let loadedFrames = 0;
+          const totalFrames = wall.frames.filter(frame => frame.image).length;
+          
+          if (totalFrames === 0) {
+            resolve();
+            return;
+          }
+          
+          wall.frames.forEach(frame => {
+            if (frame.image) {
+              const img = new window.Image();
+              img.onload = () => {
+                ctx.drawImage(img, offsetX + frame.x, offsetY + frame.y, frame.width, frame.height);
+                loadedFrames++;
+                if (loadedFrames === totalFrames) {
+                  resolve();
+                }
+              };
+              img.src = frame.image;
+            }
+          });
+        } else {
+          resolve();
+        }
+      });
+    };
+  };
+  
+  // Helper function to download canvas
+  const downloadCanvas = (canvas, filename) => {
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -216,7 +464,8 @@ const Homepage = ({ user, onLogout }) => {
             saveCurrentRoom(roomName);
           }
         }}
-        onNewRoom={createNewRoom}
+        onNewRoom={resetCurrentRoom}
+        onDownloadWalls={downloadAllWalls}
         user={user}
         onLogout={onLogout}
       />
@@ -231,9 +480,15 @@ const Homepage = ({ user, onLogout }) => {
           setSelectedWall={setSelectedWall}
           wallColors={wallColors}
           wallpapers={wallpapers}
-          onRoomSelect={setSelectedRoom}
+          onRoomSelect={handleRoomSelect}
           onShowImagePopup={() => setShowImagePopup(true)}
           onSetDimensions={() => setShowDimensionModal(true)}
+          showRoomPopup={showRoomPopup}
+          setShowRoomPopup={setShowRoomPopup}
+          onDownloadSingleWall={downloadSingleWall}
+          selectedFrameId={selectedFrameId}
+          onResizeSelectedFrame={resizeSelectedFrame}
+          frames={editingWall && walls[getWallKey(editingWall)] && Array.isArray(walls[getWallKey(editingWall)].frames) ? walls[getWallKey(editingWall)].frames : []}
         />
         <div className="col-span-12 md:col-span-9 mt-4 md:mt-0">
           <AnimatePresence mode="wait">
@@ -248,6 +503,18 @@ const Homepage = ({ user, onLogout }) => {
                 style={{ minHeight: 400 }}
               >
                 <div className="text-3xl font-bold mb-10 text-text-primary">Customize your {editingWall}</div>
+                {/* Lock Other Frames Toggle */}
+                <div className="flex items-center justify-center mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={lockOtherFrames}
+                      onChange={e => setLockOtherFrames(e.target.checked)}
+                      className="form-checkbox h-5 w-5 text-accent-blue"
+                    />
+                    <span className="text-base text-gray-700">Lock Other Frames</span>
+                  </label>
+                </div>
                 <div className="w-full h-64 flex items-center justify-center">
                   <WallCanvas
                     ref={wallCanvasRef}
@@ -256,6 +523,9 @@ const Homepage = ({ user, onLogout }) => {
                     setFrames={frames => handleSetFrames(editingWall, frames)}
                     wallColor={walls[getWallKey(editingWall)].wallColor}
                     wallpaper={walls[getWallKey(editingWall)].wallpaper}
+                    selectedFrameId={selectedFrameId}
+                    onSelectedFrameChange={setSelectedFrameId}
+                    lockOtherFrames={lockOtherFrames}
                   />
                 </div>
                 <button

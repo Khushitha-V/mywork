@@ -3,6 +3,7 @@ import { Canvas, useLoader } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import Sofa from './Sofa';
 import * as THREE from 'three';
+import { Text } from '@react-three/drei';
 
 function Wall({ position, rotation, size, color, wallpaperUrl, wallName }) {
   const [texture, setTexture] = useState(null);
@@ -35,19 +36,29 @@ function Wall({ position, rotation, size, color, wallpaperUrl, wallName }) {
   const tiny = 0.01;
   let planePosition = [0, 0, 0];
   let planeRotation = [0, 0, 0];
+  let textPosition = [0, 0, 0];
+  let textRotation = [0, 0, 0];
 
   if (wallName === 'North Wall') {
     planePosition = [0, 0, wallThickness / 2 + tiny];
     planeRotation = [0, 0, 0];
+    textPosition = [0, h / 2 + 0.1, wallThickness / 2 + tiny + 0.01];
+    textRotation = [0, 0, 0];
   } else if (wallName === 'South Wall') {
     planePosition = [0, 0, -(wallThickness / 2 + tiny)];
     planeRotation = [0, Math.PI, 0];
+    textPosition = [0, h / 2 + 0.1, -(wallThickness / 2 + tiny + 0.01)];
+    textRotation = [0, Math.PI, 0];
   } else if (wallName === 'East Wall') {
     planePosition = [0,0,-(wallThickness / 2 + tiny)];
     planeRotation = [0, -Math.PI / 1, 0];
+    textPosition = [0,h/2+0.1,-(wallThickness / 2 + tiny + 0.01)];
+    textRotation = [0, -Math.PI, 0];
   } else if (wallName === 'West Wall') {
     planePosition = [0,0,wallThickness / 2 + tiny];
     planeRotation = [0, 0 , 0];
+    textPosition = [0,h/2+0.1,(wallThickness / 2 + tiny + 0.01)];
+    textRotation = [0, 0, 0];
   }
 
   // Inset the wallpaper so it doesn't get blocked by adjacent walls
@@ -74,6 +85,24 @@ function Wall({ position, rotation, size, color, wallpaperUrl, wallName }) {
               <meshBasicMaterial color="yellow" opacity={0.3} transparent side={THREE.DoubleSide} />
             )}
           </mesh>
+          {/* Wall name label */}
+          <Text
+            position={[
+              textPosition[0],
+              textPosition[1],
+              textPosition[2] + (textRotation[1] === 0 ? 0.08 : -0.08) // Nudge forward from the wall
+            ]}
+            rotation={textRotation}
+            fontSize={0.7}
+            color="#fff"
+            anchorX="center"
+            anchorY="middle"
+            outlineColor="#111"
+            outlineWidth={0.12}
+            fontWeight="bold"
+          >
+            {wallName}
+          </Text>
         </>
       )}
     </group>
@@ -221,7 +250,7 @@ const RoomCanvas = ({ dimensions, roomType, wallColors, wallpapers: propWallpape
   // If propWallpapers is provided, merge it in (for backward compatibility)
   useEffect(() => {
     if (propWallpapers) {
-      setWallpapers(wallpapers => ({ ...wallpapers, ...propWallpapers }));
+      setWallpapers({ ...propWallpapers });
     }
   }, [propWallpapers]);
 

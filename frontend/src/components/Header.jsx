@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Header = ({onSetDimensions, onViewPrevious, onSaveRoom, onNewRoom, user, onLogout}) => {
+const Header = ({onViewPrevious, onSaveRoom, onNewRoom, onDownloadWalls, user, onLogout}) => {
   return (
     <header className="glass-effect shadow-lg border-b border-white/20 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -12,33 +12,32 @@ const Header = ({onSetDimensions, onViewPrevious, onSaveRoom, onNewRoom, user, o
           </div>
           
           <div className="flex items-center space-x-4">
-          <button
+            <button
                 onClick={onNewRoom}
-                className="w-full bg-pastel-purple text-text-primary p-3 rounded-lg font-medium hover:bg-soft-purple transition-all"
+                className="w-full bg-pastel-pink text-text-primary p-3 rounded-lg font-medium hover:bg-soft-pink transition-all"
               >
-                ↩️ New Room
+                🔄 Reset Room
               </button>
-            
             <button
                 onClick={onSaveRoom}
                 className="w-full bg-pastel-blue text-text-primary p-3 rounded-lg font-medium hover:bg-soft-blue transition-all"
               >
                 💾 Save Room
               </button>
-
-              {/* <button
-                onClick={handleReset}
-                className="w-full bg-pastel-pink text-text-primary p-3 rounded-lg font-medium hover:bg-soft-pink transition-all"
-              >
-                🔄 Reset Room
-              </button> */}
             
             <button
-              onClick={onViewPrevious}
-              className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-            >
-              My Rooms
-            </button>
+                onClick={onDownloadWalls}
+                className="w-full bg-gradient-to-r from-green-400 to-teal-400 text-white p-3 rounded-lg font-medium hover:from-green-500 hover:to-teal-500 transition-all"
+              >
+                📥 Download
+              </button>
+            
+            <button
+                onClick={onViewPrevious}
+                className="w-full bg-pastel-blue text-text-primary p-3 rounded-lg font-medium hover:bg-soft-pink transition-all"
+              >
+               🏠 My Rooms
+              </button>
             
             {user && (
               <div className="flex items-center space-x-3">

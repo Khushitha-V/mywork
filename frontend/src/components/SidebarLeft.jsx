@@ -29,7 +29,7 @@ const colorMap = {
   violet: '#8b5cf6',
 };
 
-const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, selectedWall, setSelectedWall, wallCanvasData, setWallCanvasData, wallColors, wallpapers, onRoomSelect, onShowImagePopup, onSetDimensions }) => {
+const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, selectedWall, setSelectedWall, wallCanvasData, setWallCanvasData, wallColors, wallpapers, onRoomSelect, onShowImagePopup, onSetDimensions, showRoomPopup, setShowRoomPopup, onDownloadSingleWall, selectedFrameId, onResizeSelectedFrame, frames }) => {
   const [selectedSwatch, setSelectedSwatch] = useState(null);
   const [selectedPosition, setSelectedPosition] = useState('Center');
   const [wallpaperFile, setWallpaperFile] = useState(null);
@@ -39,7 +39,6 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
   const [showCropper, setShowCropper] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
-  const [showRoomPopup, setShowRoomPopup] = useState(false);
   const fileInputRef = useRef();
 
   useEffect(() => {
@@ -153,9 +152,22 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
   };
 
   const handleDownload = () => {
-    console.log("Downloading 2D version");
-    // Canvas export logic here
+    const canvas = document.getElementById('wall-2d-canvas');
+    if (!canvas) {
+      alert('2D wall canvas not found!');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = 'wall-2d-design.png';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
+
+  // Find the selected frame
+  const selectedFrame = Array.isArray(frames) && selectedFrameId ? frames.find(f => f.id === selectedFrameId) : null;
 
   return (
     <div className="w-full md:col-span-3 h-auto md:h-[calc(100vh-140px)]">
@@ -375,7 +387,22 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
           </div>
         </div>
 
-        
+        {/* Frame Resize Slider */}
+        {selectedFrame && onResizeSelectedFrame && (
+          <div className="mb-8 flex flex-col items-center">
+            <label className="block text-sm font-medium text-text-secondary mb-2">Resize Selected Frame</label>
+            <input
+              type="range"
+              min="40"
+              max="300"
+              value={selectedFrame.width}
+              onChange={e => onResizeSelectedFrame(parseInt(e.target.value, 10))}
+              className="w-32 rotate-[-90deg] mb-2"
+              style={{ height: '120px' }}
+            />
+            <div className="text-xs text-gray-500">Size: {selectedFrame.width} x {selectedFrame.height}</div>
+          </div>
+        )}
 
         {/* Actions Section */}
         <div className="mb-8 space-y-6">
@@ -390,40 +417,17 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
                 <div className="text-sm">Manage Images</div>
               </button>
 
-              <button
-                onClick={handleDownload}
-                className="w-full bg-gradient-to-r from-green-400 to-teal-400 text-white p-3 rounded-xl font-medium hover:to-teal-500 transition-all shadow-lg text-center"
-              >
-                <div className="text-lg mb-1">📥</div>
-                <div className="text-sm">Download 2D Version</div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="mb-8 space-y-6">
-          <div>
-            <h3 className="text-lg font-semibold text-text-primary mb-4">Quick Actions</h3>
-            <div className="space-y-3">
-              <button
-                onClick={handleSaveProgress}
-                className="w-full bg-pastel-blue text-text-primary p-3 rounded-lg font-medium hover:bg-soft-blue transition-all"
-              >
-                💾 Save Progress
-              </button>
-              <button
-                onClick={handleUndo}
-                className="w-full bg-pastel-purple text-text-primary p-3 rounded-lg font-medium hover:bg-soft-purple transition-all"
-              >
-                ↩️ Undo Changes
-              </button>
-              <button
-                onClick={handleReset}
-                className="w-full bg-pastel-pink text-text-primary p-3 rounded-lg font-medium hover:bg-soft-pink transition-all"
-              >
-                🔄 Reset Room
-              </button>
+             {/* Download Individual Wall */}
+             <div className="mt-6">
+                  <button
+                    onClick={() => onDownloadSingleWall && onDownloadSingleWall(selectedWall)}
+                    disabled={!selectedWall}
+                    className="w-full bg-gradient-to-r from-green-400 to-teal-400 text-white p-3 rounded-xl font-medium hover:from-green-500 hover:to-teal-500 transition-all shadow-lg text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="text-lg mb-1">📥</div>
+                    <div className="text-sm">Download {selectedWall || 'Wall'}</div>
+                  </button>
+                </div>
             </div>
           </div>
         </div>

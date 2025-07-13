@@ -7,12 +7,14 @@ const WALL_HEIGHT = 300;
 const MIN_FRAME_SIZE = 40;
 const RESIZE_HANDLE_SIZE = 14;
 
-const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpaper }, ref) => {
+const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpaper, selectedFrameId, onSelectedFrameChange, lockOtherFrames }, ref) => {
   const canvasRef = useRef();
   const [draggedOverFrameId, setDraggedOverFrameId] = useState(null);
   const [dragState, setDragState] = useState(null); // { type: 'move'|'resize', frameId, offsetX, offsetY, origW, origH }
   const [lastClickTime, setLastClickTime] = useState(0);
-  const [selectedFrameId, setSelectedFrameId] = useState(null);
+  const [hoveredFrameId, setHoveredFrameId] = useState(null);
+  // Remove: const [selectedFrameId, setSelectedFrameId] = useState(null);
+  // Use only the selectedFrameId prop and onSelectedFrameChange prop for selection logic.
 
   // Ensure frames is always an array
   const safeFrames = Array.isArray(frames) ? frames : [];
@@ -193,39 +195,13 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
         }
         
         // Draw resize handles only for selected frame
-        if (frame.id === selectedFrameId) {
-          drawResizeHandles(ctx, frame);
-        }
+        // if (frame.id === selectedFrameId) {
+        //   drawResizeHandles(ctx, frame);
+        // }
       });
     }
     
-    function drawResizeHandles(ctx, frame) {
-      const handleSize = RESIZE_HANDLE_SIZE;
-      const handles = [
-        // Corners
-        { x: frame.x, y: frame.y, cursor: 'nw-resize' }, // Top-left
-        { x: frame.x + frame.width - handleSize, y: frame.y, cursor: 'ne-resize' }, // Top-right
-        { x: frame.x, y: frame.y + frame.height - handleSize, cursor: 'sw-resize' }, // Bottom-left
-        { x: frame.x + frame.width - handleSize, y: frame.y + frame.height - handleSize, cursor: 'se-resize' }, // Bottom-right
-        // Edges
-        { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y, cursor: 'n-resize' }, // Top
-        { x: frame.x + frame.width / 2 - handleSize / 2, y: frame.y + frame.height - handleSize, cursor: 's-resize' }, // Bottom
-        { x: frame.x, y: frame.y + frame.height / 2 - handleSize / 2, cursor: 'w-resize' }, // Left
-        { x: frame.x + frame.width - handleSize, y: frame.y + frame.height / 2 - handleSize / 2, cursor: 'e-resize' }, // Right
-      ];
-      
-      handles.forEach(handle => {
-        ctx.save();
-        ctx.fillStyle = '#fff';
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.rect(handle.x, handle.y, handleSize, handleSize);
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      });
-    }
+    // Remove drawResizeHandles function entirely
   }, [wallColor, wallpaper, safeFrames, draggedOverFrameId, selectedFrameId]);
 
   function getFrameAt(x, y) {
@@ -296,10 +272,20 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     const clickedFrame = getFrameAt(x, y);
     console.log('Clicked frame:', clickedFrame);
     
+    // If lockOtherFrames is true, only allow selecting the selected frame
+    if (lockOtherFrames && clickedFrame && clickedFrame.id !== selectedFrameId) {
+      // Do not allow selecting or moving other frames
+      return;
+    }
+    
     if (clickedFrame) {
       console.log('Frame clicked, starting movement');
       // Select the frame
-      setSelectedFrameId(clickedFrame.id);
+      if (onSelectedFrameChange) {
+        onSelectedFrameChange(clickedFrame.id);
+      } else {
+        // setSelectedFrameId(clickedFrame.id); // This line is removed as per the edit hint
+      }
       
       // Start moving the frame immediately
       const newDragState = {
@@ -316,7 +302,11 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     }
     
     // If not clicking on any frame, deselect
-    setSelectedFrameId(null);
+    if (onSelectedFrameChange) {
+      onSelectedFrameChange(null);
+    } else {
+      // setSelectedFrameId(null); // This line is removed as per the edit hint
+    }
   };
 
   const handleMouseMove = (e) => {
@@ -324,15 +314,21 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    // Update cursor
+    // Update cursor and hovered frame
     if (!dragState) {
       const resizeInfo = getResizeHandleAt(x, y);
       if (resizeInfo) {
         canvasRef.current.style.cursor = resizeInfo.handle.cursor;
-      } else if (getFrameAt(x, y)) {
-        canvasRef.current.style.cursor = 'grab';
+        setHoveredFrameId(null);
       } else {
-        canvasRef.current.style.cursor = 'default';
+        const frame = getFrameAt(x, y);
+        if (frame) {
+          canvasRef.current.style.cursor = 'move';
+          setHoveredFrameId(frame.id);
+        } else {
+          canvasRef.current.style.cursor = 'default';
+          setHoveredFrameId(null);
+        }
       }
       return;
     }
@@ -353,6 +349,7 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
           let newY = Math.max(0, Math.min(y - dragState.offsetY, WALL_HEIGHT - f.height));
           console.log('Moving frame to:', newX, newY);
           console.log('Frame being moved:', f);
+          // Allow all frame types (including stickers) to move
           return { ...f, x: newX, y: newY };
         } else if (dragState.type === 'resize') {
           const handle = dragState.handle;
@@ -535,18 +532,88 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
     setFrames(currentFrames.map(f => f.id === id ? { ...f, ...newProps } : f));
   };
 
-  let lastDeleteTime = 0;
+  let lastDeleteTime = useRef(0);
+  const deleteLockRef = useRef(false);
 
   const handleDeleteFrame = (id) => {
-    const now = Date.now();
-    if (now - lastDeleteTime < 500) {
-      // Ignore rapid repeated delete attempts
-      return;
-    }
-    lastDeleteTime = now;
-    console.log('handleDeleteFrame called for id:', id);
+    if (deleteLockRef.current) return; // Prevent multiple deletes
     const currentFrames = Array.isArray(frames) ? frames : [];
+    // Only delete if the frame is selected and not a sticker
+    const frameToDelete = currentFrames.find(f => f.id === id);
+    if (!frameToDelete) return;
+    if (frameToDelete.shape === 'sticker') return; // Do not allow deleting stickers
+    if (selectedFrameId !== id) return; // Only allow deleting the selected frame
     setFrames(currentFrames.filter(f => f.id !== id));
+    if (onSelectedFrameChange) onSelectedFrameChange(null); // Clear selection after delete
+    deleteLockRef.current = true; // Lock further deletes until selection changes
+  };
+
+  // Add a function to resize the selected frame from the sidebar
+  const handleSidebarResize = (newSize) => {
+    if (!selectedFrameId) return;
+    setFrames(prevFrames => prevFrames.map(f => f.id === selectedFrameId ? { ...f, width: newSize, height: newSize } : f));
+  };
+
+  // Remove onSelectedFrameResize prop and related useEffect
+
+  // Double-tap support for mobile
+  const lastTapRef = useRef(0);
+
+  // Handle double-click (desktop)
+  const handleDoubleClick = (e) => {
+    if (!selectedFrameId) return; // Only allow if a frame is selected
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const clickedFrame = getFrameAt(x, y);
+    if (clickedFrame && selectedFrameId === clickedFrame.id) {
+      // Only allow delete if not a sticker and is selected
+      if (clickedFrame.shape !== 'sticker') {
+        if (window.confirm('Are you sure you want to delete this frame?')) {
+          handleDeleteFrame(clickedFrame.id);
+        }
+      }
+    }
+  };
+
+  // Handle double-tap (mobile)
+  const handleTouchEnd = (e) => {
+    if (!selectedFrameId) return; // Only allow if a frame is selected
+    const now = Date.now();
+    const TAP_DELAY = 300;
+    if (lastTapRef.current && (now - lastTapRef.current) < TAP_DELAY) {
+      // Double-tap detected
+      // Get touch position
+      const touch = e.changedTouches[0];
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      const tappedFrame = getFrameAt(x, y);
+      if (tappedFrame && selectedFrameId === tappedFrame.id) {
+        // Only allow delete if not a sticker and is selected
+        if (tappedFrame.shape !== 'sticker') {
+          if (window.confirm('Are you sure you want to delete this frame?')) {
+            handleDeleteFrame(tappedFrame.id);
+          }
+        }
+      }
+      lastTapRef.current = 0; // reset
+    } else {
+      lastTapRef.current = now;
+    }
+  };
+
+  // Wrap onSelectedFrameChange to reset delete lock
+  const handleSelectedFrameChange = (id) => {
+    deleteLockRef.current = false; // Unlock delete when selection changes
+    if (onSelectedFrameChange) onSelectedFrameChange(id);
+  };
+
+  const handleMouseLeave = (e) => {
+    setHoveredFrameId(null);
+    if (canvasRef.current) {
+      canvasRef.current.style.cursor = 'default';
+    }
   };
 
   return (
@@ -567,7 +634,9 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
+        onDoubleClick={handleDoubleClick}
+        onTouchEnd={handleTouchEnd}
       />
       {/* Delete button is only shown on hover of the selected frame/sticker. Deletion is only possible via this button. Double-click/tap does NOT delete. */}
       {Array.isArray(safeFrames) && selectedFrameId && (() => {
@@ -584,7 +653,6 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
               height: `${frame.height}px`,
               pointerEvents: 'none',
             }}
-            onDoubleClick={e => e.stopPropagation()} // Prevent double-click from bubbling
           >
             <button
               className="delete-btn-on-hover"
@@ -608,11 +676,15 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
                 cursor: 'pointer'
               }}
               title="Delete frame"
+              tabIndex={-1}
               onClick={e => {
                 e.stopPropagation();
-                handleDeleteFrame(frame.id);
+                if (e.type === 'click') {
+                  if (window.confirm('Are you sure you want to delete this frame?')) {
+                    handleDeleteFrame(frame.id);
+                  }
+                }
               }}
-              onDoubleClick={e => e.stopPropagation()} // Prevent double-click from bubbling
             >
               ×
             </button>
