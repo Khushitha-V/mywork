@@ -264,6 +264,8 @@ const WallCanvas = forwardRef(({ wallName, frames, setFrames, wallColor, wallpap
         offsetY: y - clickedFrame.y,
         startX: x,
         startY: y
+        startX: x,
+        startY: y
       });
       return;
     }
