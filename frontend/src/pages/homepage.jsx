@@ -6,6 +6,7 @@ import RoomDimensionModal from '../components/RoomDimensionModal';
 import PreviousRoomsModal from '../components/PreviousRoomsModal';
 import { motion, AnimatePresence } from 'framer-motion';
 import WallCanvas from '../components/WallCanvas';
+import jsPDF from 'jspdf';
 
 const DEFAULT_DIMENSIONS = { length: 8, width: 8, height: 3 };
 const DEFAULT_ROOM = 'others';
@@ -39,6 +40,15 @@ const Homepage = ({ user, onLogout }) => {
   const wallCanvasRef = useRef();
   const [selectedFrameId, setSelectedFrameId] = useState(null);
   const [lockOtherFrames, setLockOtherFrames] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareBlobUrl, setShareBlobUrl] = useState("");
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [receiverEmail, setReceiverEmail] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpInput, setOtpInput] = useState("");
+  const [emailStatus, setEmailStatus] = useState("");
+  const [isSending, setIsSending] = useState(false);
   // Add a function to resize the selected frame in the current wall
   const resizeSelectedFrame = (newSize) => {
     if (!editingWall || !selectedFrameId) return;
@@ -83,13 +93,22 @@ const Homepage = ({ user, onLogout }) => {
     return 'north'; // default
   };
 
-  const handleAddImages = (event) => {
+  const fileToDataUrl = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAddImages = async (event) => {
     const files = Array.from(event.target.files);
-    const newImages = files.map(file => ({
-      url: URL.createObjectURL(file),
+    const newImages = await Promise.all(files.map(async file => ({
+      url: await fileToDataUrl(file),
       name: file.name,
       file
-    }));
+    })));
     setImages(prev => [...prev, ...newImages]);
   };
 
@@ -172,7 +191,8 @@ const Homepage = ({ user, onLogout }) => {
         dimensions: roomDimensions,
         wallColors: wallColors,
         wallpapers: wallpapers,
-        wallCanvasData: wallCanvasData
+        wallCanvasData: wallCanvasData,
+        walls: walls // <-- persist frames and all wall data
       };
 
       const url = currentRoomId 
@@ -211,7 +231,7 @@ const Homepage = ({ user, onLogout }) => {
     setWallCanvasData(room.wall_canvas_data || room.wallCanvasData || {});
     setCurrentRoomId(room.id);
 
-    // Update walls state based on loaded room
+    // Update walls state based on loaded room, always restoring frames
     const newWalls = { ...walls };
     Object.keys(newWalls).forEach(wallKey => {
       const wallName = wallKey.charAt(0).toUpperCase() + wallKey.slice(1) + ' Wall';
@@ -221,8 +241,15 @@ const Homepage = ({ user, onLogout }) => {
       if (room.wallpapers && room.wallpapers[wallName]) {
         newWalls[wallKey].wallpaper = room.wallpapers[wallName];
       }
+      // Always restore frames for each wall, defaulting to [] if not present
+      newWalls[wallKey].frames = (room.walls && room.walls[wallKey] && Array.isArray(room.walls[wallKey].frames))
+        ? room.walls[wallKey].frames
+        : [];
     });
     setWalls(newWalls);
+    // Open the 2D editor for the selected wall, or default to North Wall
+    setIs2DMode(true);
+    setEditingWall(selectedWall || 'North Wall');
   };
 
   const createNewRoom = () => {
@@ -282,100 +309,86 @@ const Homepage = ({ user, onLogout }) => {
     return hasCustomColor || hasWallpaper || hasFrames;
   };
 
-  // Function to download all designed walls (only edited walls)
-  const downloadAllWalls = () => {
+  // Download all edited walls as a PDF, each wall as a page with its wall name
+  const downloadAllWalls = async () => {
     const wallNames = ['North Wall', 'South Wall', 'East Wall', 'West Wall'];
     const editedWalls = wallNames.filter(isWallEdited);
     if (editedWalls.length === 0) {
       alert('No walls have been designed yet!');
       return;
     }
-    // Calculate grid size
-    const cols = Math.min(2, editedWalls.length);
-    const rows = Math.ceil(editedWalls.length / cols);
     const wallWidth = 600;
     const wallHeight = 300;
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = wallWidth * cols;
-    canvas.height = wallHeight * rows;
-    ctx.fillStyle = '#f8f9fa';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Function to draw a single wall
-    const drawWall = (wallName, x, y) => {
-      return new Promise((resolve) => {
-        const wallKey = getWallKey(wallName);
-        const wall = walls[wallKey];
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [wallWidth, wallHeight + 30] });
+    for (let i = 0; i < editedWalls.length; i++) {
+      const wallName = editedWalls[i];
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = wallWidth;
+      canvas.height = wallHeight + 30; // extra space for label
+      // Draw label background
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, wallWidth, 30);
+      ctx.fillStyle = '#374151';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(wallName, wallWidth / 2, 22);
+      // Draw wall background
+      const wallKey = getWallKey(wallName);
+      const wall = walls[wallKey];
+      await new Promise((resolve) => {
         if (wall.wallpaper) {
           const img = new window.Image();
           img.onload = () => {
-            ctx.drawImage(img, x, y, wallWidth, wallHeight);
-            drawFrames(wallName, x, y).then(resolve);
+            ctx.drawImage(img, 0, 30, wallWidth, wallHeight);
+            drawFrames(ctx, wallName, 0, 30).then(() => resolve());
           };
           img.src = wall.wallpaper;
         } else if (wall.wallColor) {
           ctx.fillStyle = wall.wallColor;
-          ctx.fillRect(x, y, wallWidth, wallHeight);
-          drawFrames(wallName, x, y).then(resolve);
+          ctx.fillRect(0, 30, wallWidth, wallHeight);
+          drawFrames(ctx, wallName, 0, 30).then(() => resolve());
         } else {
           ctx.fillStyle = '#f3f4f6';
-          ctx.fillRect(x, y, wallWidth, wallHeight);
-          drawFrames(wallName, x, y).then(resolve);
+          ctx.fillRect(0, 30, wallWidth, wallHeight);
+          drawFrames(ctx, wallName, 0, 30).then(() => resolve());
         }
       });
-    };
-    // Function to draw frames on a wall
-    const drawFrames = (wallName, offsetX, offsetY) => {
-      return new Promise((resolve) => {
-        const wallKey = getWallKey(wallName);
-        const wall = walls[wallKey];
-        if (wall.frames && Array.isArray(wall.frames) && wall.frames.length > 0) {
-          let loadedFrames = 0;
-          const totalFrames = wall.frames.filter(frame => frame.image).length;
-          if (totalFrames === 0) {
-            resolve();
-            return;
-          }
-          wall.frames.forEach(frame => {
-            if (frame.image) {
-              const img = new window.Image();
-              img.onload = () => {
-                ctx.drawImage(img, offsetX + frame.x, offsetY + frame.y, frame.width, frame.height);
-                loadedFrames++;
-                if (loadedFrames === totalFrames) {
-                  resolve();
-                }
-              };
-              img.src = frame.image;
-            }
-          });
-        } else {
+      const imgData = canvas.toDataURL('image/png');
+      if (i > 0) pdf.addPage([wallWidth, wallHeight + 30], 'landscape');
+      pdf.addImage(imgData, 'PNG', 0, 0, wallWidth, wallHeight + 30);
+    }
+    pdf.save('room-design.pdf');
+  };
+
+  // Function to draw frames on a wall
+  const drawFrames = (ctx, wallName, offsetX, offsetY) => {
+    return new Promise((resolve) => {
+      const wallKey = getWallKey(wallName);
+      const wall = walls[wallKey];
+      if (wall.frames && Array.isArray(wall.frames) && wall.frames.length > 0) {
+        let loadedFrames = 0;
+        const totalFrames = wall.frames.filter(frame => frame.image).length;
+        if (totalFrames === 0) {
           resolve();
+          return;
         }
-      });
-    };
-    // Draw all edited walls in a grid and wait for all to complete
-    Promise.all(editedWalls.map((wallName, index) => {
-      const row = Math.floor(index / cols);
-      const col = index % cols;
-      const x = col * wallWidth;
-      const y = row * wallHeight;
-      // Add wall label
-      ctx.fillStyle = '#374151';
-      ctx.font = 'bold 16px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(wallName, x + wallWidth / 2, y + 25);
-      return drawWall(wallName, x, y + 30);
-    })).then(() => {
-      // Download the combined image after all walls are drawn
-      const dataUrl = canvas.toDataURL('image/png');
-      const link = document.createElement('a');
-      link.href = dataUrl;
-      link.download = `room-design-${new Date().toISOString().split('T')[0]}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+        wall.frames.forEach(frame => {
+          if (frame.image) {
+            const img = new window.Image();
+            img.onload = () => {
+              ctx.drawImage(img, offsetX + frame.x, offsetY + frame.y, frame.width, frame.height);
+              loadedFrames++;
+              if (loadedFrames === totalFrames) {
+                resolve();
+              }
+            };
+            img.src = frame.image;
+          }
+        });
+      } else {
+        resolve();
+      }
     });
   };
 
@@ -397,7 +410,7 @@ const Homepage = ({ user, onLogout }) => {
       const img = new window.Image();
       img.onload = () => {
         ctx.drawImage(img, 0, 0, wallWidth, wallHeight);
-        drawFrames(wallName, 0, 0).then(() => {
+        drawFrames(ctx, wallName, 0, 0).then(() => {
           downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
         });
       };
@@ -405,50 +418,16 @@ const Homepage = ({ user, onLogout }) => {
     } else if (wall.wallColor) {
       ctx.fillStyle = wall.wallColor;
       ctx.fillRect(0, 0, wallWidth, wallHeight);
-      drawFrames(wallName, 0, 0).then(() => {
+      drawFrames(ctx, wallName, 0, 0).then(() => {
         downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
       });
     } else {
       ctx.fillStyle = '#f3f4f6';
       ctx.fillRect(0, 0, wallWidth, wallHeight);
-      drawFrames(wallName, 0, 0).then(() => {
+      drawFrames(ctx, wallName, 0, 0).then(() => {
         downloadCanvas(canvas, `${wallName.toLowerCase().replace(' ', '-')}-design.png`);
       });
     }
-    
-    // Function to draw frames on a wall
-    const drawFrames = (wallName, offsetX, offsetY) => {
-      return new Promise((resolve) => {
-        const wallKey = getWallKey(wallName);
-        const wall = walls[wallKey];
-        
-        if (wall.frames && Array.isArray(wall.frames) && wall.frames.length > 0) {
-          let loadedFrames = 0;
-          const totalFrames = wall.frames.filter(frame => frame.image).length;
-          
-          if (totalFrames === 0) {
-            resolve();
-            return;
-          }
-          
-          wall.frames.forEach(frame => {
-            if (frame.image) {
-              const img = new window.Image();
-              img.onload = () => {
-                ctx.drawImage(img, offsetX + frame.x, offsetY + frame.y, frame.width, frame.height);
-                loadedFrames++;
-                if (loadedFrames === totalFrames) {
-                  resolve();
-                }
-              };
-              img.src = frame.image;
-            }
-          });
-        } else {
-          resolve();
-        }
-      });
-    };
   };
   
   // Helper function to download canvas
@@ -462,21 +441,222 @@ const Homepage = ({ user, onLogout }) => {
     document.body.removeChild(link);
   };
 
+  // Helper: Generate a combined PNG of all edited walls and return a blob
+  const generateAllWallsImageBlob = () => {
+    return new Promise((resolve, reject) => {
+      const wallNames = ['North Wall', 'South Wall', 'East Wall', 'West Wall'];
+      // Always export all four walls, not just edited ones
+      const exportedWalls = wallNames;
+      // Calculate grid size
+      const cols = Math.min(2, exportedWalls.length);
+      const rows = Math.ceil(exportedWalls.length / cols);
+      const wallWidth = 600;
+      const wallHeight = 300;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = wallWidth * cols;
+      canvas.height = wallHeight * rows;
+      ctx.fillStyle = '#f8f9fa';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Function to draw a single wall
+      const drawWall = (wallName, x, y) => {
+        return new Promise((resolveWall) => {
+          const wallKey = getWallKey(wallName);
+          const wall = walls[wallKey];
+          if (wall.wallpaper) {
+            const img = new window.Image();
+            img.onload = () => {
+              ctx.drawImage(img, x, y, wallWidth, wallHeight);
+              drawFrames(ctx, wallName, x, y).then(resolveWall);
+            };
+            img.src = wall.wallpaper;
+          } else if (wall.wallColor) {
+            ctx.fillStyle = wall.wallColor;
+            ctx.fillRect(x, y, wallWidth, wallHeight);
+            drawFrames(ctx, wallName, x, y).then(resolveWall);
+          } else {
+            ctx.fillStyle = '#f3f4f6';
+            ctx.fillRect(x, y, wallWidth, wallHeight);
+            drawFrames(ctx, wallName, x, y).then(resolveWall);
+          }
+        });
+      };
+      // Draw all walls in a grid and wait for all to complete
+      Promise.all(exportedWalls.map((wallName, index) => {
+        const row = Math.floor(index / cols);
+        const col = index % cols;
+        const x = col * wallWidth;
+        const y = row * wallHeight;
+        // Add wall label with background for readability
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(x, y, wallWidth, 30); // background for label
+        ctx.fillStyle = '#374151';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(wallName, x + wallWidth / 2, y + 22);
+        return drawWall(wallName, x, y + 30);
+      })).then(() => {
+        canvas.toBlob(blob => {
+          if (blob) resolve(blob);
+          else reject('Failed to generate image blob');
+        }, 'image/png');
+      });
+    });
+  };
+
+  // Share handler: always share all walls as a PDF
+  const handleShare = async () => {
+    try {
+      const wallNames = ['North Wall', 'South Wall', 'East Wall', 'West Wall'];
+      const editedWalls = wallNames.filter(isWallEdited);
+      if (editedWalls.length === 0) {
+        alert('No walls have been designed yet!');
+        return;
+      }
+      const wallWidth = 600;
+      const wallHeight = 300;
+      const jsPDFModule = (await import('jspdf')).default;
+      const pdf = new jsPDFModule({ orientation: 'landscape', unit: 'px', format: [wallWidth, wallHeight + 30] });
+      for (let i = 0; i < editedWalls.length; i++) {
+        const wallName = editedWalls[i];
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = wallWidth;
+        canvas.height = wallHeight + 30; // extra space for label
+        // Draw label background
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, wallWidth, 30);
+        ctx.fillStyle = '#374151';
+        ctx.font = 'bold 16px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(wallName, wallWidth / 2, 22);
+        // Draw wall background
+        const wallKey = getWallKey(wallName);
+        const wall = walls[wallKey];
+        await new Promise((resolve) => {
+          if (wall.wallpaper) {
+            const img = new window.Image();
+            img.onload = () => {
+              ctx.drawImage(img, 0, 30, wallWidth, wallHeight);
+              drawFrames(ctx, wallName, 0, 30).then(() => resolve());
+            };
+            img.src = wall.wallpaper;
+          } else if (wall.wallColor) {
+            ctx.fillStyle = wall.wallColor;
+            ctx.fillRect(0, 30, wallWidth, wallHeight);
+            drawFrames(ctx, wallName, 0, 30).then(() => resolve());
+          } else {
+            ctx.fillStyle = '#f3f4f6';
+            ctx.fillRect(0, 30, wallWidth, wallHeight);
+            drawFrames(ctx, wallName, 0, 30).then(() => resolve());
+          }
+        });
+        const imgData = canvas.toDataURL('image/png');
+        if (i > 0) pdf.addPage([wallWidth, wallHeight + 30], 'landscape');
+        pdf.addImage(imgData, 'PNG', 0, 0, wallWidth, wallHeight + 30);
+      }
+      // Get PDF blob
+      const pdfBlob = pdf.output('blob');
+      // Upload PDF to backend
+      const formData = new FormData();
+      formData.append('file', pdfBlob, 'room-design.pdf');
+      const response = await fetch('http://localhost:5000/api/upload-image', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (data.url) {
+        setShareUrl(data.url);
+        setShowShareModal(true);
+      } else {
+        alert('Failed to upload PDF for sharing.');
+      }
+    } catch (err) {
+      // error already alerted in generateAllWallsImageBlob
+    }
+  };
+
+  // Handler to open email modal
+  const handleEmailShare = () => {
+    setShowEmailModal(true);
+    setReceiverEmail("");
+    setOtpSent(false);
+    setOtpInput("");
+    setEmailStatus("");
+  };
+
+  // Handler to send OTP
+  const handleSendOtp = async () => {
+    setIsSending(true);
+    setEmailStatus("");
+    try {
+      const res = await fetch('http://localhost:5000/api/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiver: receiverEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOtpSent(true);
+        setEmailStatus("OTP sent to " + receiverEmail);
+      } else {
+        setEmailStatus(data.error || 'Failed to send OTP');
+      }
+    } catch (err) {
+      setEmailStatus('Network error');
+    }
+    setIsSending(false);
+  };
+
+  // Handler to verify OTP and send PDF
+  const handleVerifyOtpAndSendPdf = async () => {
+    setIsSending(true);
+    setEmailStatus("");
+    try {
+      const res = await fetch('http://localhost:5000/api/verify-otp-and-send-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiver: receiverEmail, otp: otpInput, pdf_link: shareUrl })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEmailStatus("PDF link sent to " + receiverEmail);
+        setTimeout(() => setShowEmailModal(false), 2000);
+      } else {
+        setEmailStatus(data.error || 'Failed to send PDF');
+      }
+    } catch (err) {
+      setEmailStatus('Network error');
+    }
+    setIsSending(false);
+  };
+
+  const [imagePopupPosition, setImagePopupPosition] = useState(null);
+
+  const handleShowImagePopup = (pos) => {
+    setShowImagePopup(true);
+    setImagePopupPosition(pos || { top: 100, left: 100 });
+  };
+
   return (
     <div className="gradient-bg min-h-screen font-sans">
       <Header
         onSetDimensions={() => setShowDimensionModal(true)}
         onViewPrevious={() => setShowPreviousModal(true)}
         onSaveRoom={() => {
-          const roomName = prompt('Enter room name:');
-          if (roomName !== null) {
-            saveCurrentRoom(roomName);
+          let roomName = null;
+          while (roomName === null || roomName.trim() === "") {
+            roomName = prompt('Enter room name:');
+            if (roomName === null) return; // user cancelled
           }
+          saveCurrentRoom(roomName);
         }}
-        onNewRoom={resetCurrentRoom}
+        onNewRoom={createNewRoom}
+        onResetRoom={resetCurrentRoom}
         onDownloadWalls={downloadAllWalls}
         user={user}
         onLogout={onLogout}
+        onShare={handleShare}
       />
       <div className="w-full min-h-[calc(100vh-100px)] px-1 md:px-2 pb-4 grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
         <SidebarLeft 
@@ -490,7 +670,7 @@ const Homepage = ({ user, onLogout }) => {
           wallColors={wallColors}
           wallpapers={wallpapers}
           onRoomSelect={handleRoomSelect}
-          onShowImagePopup={() => setShowImagePopup(true)}
+          onShowImagePopup={handleShowImagePopup}
           onSetDimensions={() => setShowDimensionModal(true)}
           showRoomPopup={showRoomPopup}
           setShowRoomPopup={setShowRoomPopup}
@@ -526,15 +706,11 @@ const Homepage = ({ user, onLogout }) => {
                 </div>
                 <div className="w-full h-64 flex items-center justify-center">
                   <WallCanvas
-                    ref={wallCanvasRef}
-                    wallName={editingWall?.toLowerCase()}
                     frames={walls[getWallKey(editingWall)].frames}
-                    setFrames={frames => handleSetFrames(editingWall, frames)}
+                    setFrames={elements => handleSetFrames(editingWall, elements)}
+                    ref={wallCanvasRef}
                     wallColor={walls[getWallKey(editingWall)].wallColor}
                     wallpaper={walls[getWallKey(editingWall)].wallpaper}
-                    selectedFrameId={selectedFrameId}
-                    onSelectedFrameChange={setSelectedFrameId}
-                    lockOtherFrames={lockOtherFrames}
                   />
                 </div>
                 <button
@@ -544,9 +720,17 @@ const Homepage = ({ user, onLogout }) => {
                     if (editingWall && wallCanvasRef.current) {
                       const canvas = wallCanvasRef.current;
                       const dataUrl = canvas.toDataURL();
+                      // Normalize wall name to match RoomCanvas keys
+                      const wallNameMap = {
+                        north: 'North Wall',
+                        south: 'South Wall',
+                        east: 'East Wall',
+                        west: 'West Wall'
+                      };
+                      const wallKey = wallNameMap[getWallKey(editingWall)] || editingWall;
                       setWallpapers(prev => ({
                         ...prev,
-                        [editingWall]: dataUrl
+                        [wallKey]: dataUrl
                       }));
                     }
                     setIs2DMode(false);
@@ -577,37 +761,6 @@ const Homepage = ({ user, onLogout }) => {
         </div>
       </div>
 
-      {showImagePopup && (
-        <div className="fixed top-8 right-8 z-50 bg-white rounded-xl shadow-2xl p-6 w-80">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold">Manage Images</h3>
-            <button onClick={() => setShowImagePopup(false)} className="text-gray-500 hover:text-gray-700">✖</button>
-          </div>
-          <input type="file" multiple accept="image/*" onChange={handleAddImages} className="mb-4" />
-          <div className="grid grid-cols-3 gap-2 mb-2">
-            {images.map(img => (
-              <div key={img.name} className="relative group">
-                <img 
-                  src={img.url} 
-                  alt={img.name} 
-                  className="w-full h-20 object-cover rounded" 
-                  draggable={true}
-                  onDragStart={e => e.dataTransfer.setData('managed-image-url', img.url)}
-                />
-                <button
-                  onClick={() => handleDeleteImage(img.name)}
-                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-80 group-hover:opacity-100"
-                  title="Delete"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-          {images.length === 0 && <div className="text-gray-400 text-sm text-center">No images added yet.</div>}
-        </div>
-      )}
-
       {showDimensionModal && (
         <RoomDimensionModal
           onClose={() => setShowDimensionModal(false)}
@@ -625,6 +778,74 @@ const Homepage = ({ user, onLogout }) => {
           onClose={() => setShowPreviousModal(false)} 
           onLoadRoom={loadRoom}
         />
+      )}
+
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-lg w-full max-w-xs flex flex-col items-center">
+            <h3 className="text-lg font-bold mb-4 text-text-primary">Share Your Room Design (PDF)</h3>
+            <button
+              className="w-full bg-accent-blue text-white py-2 rounded-lg text-center font-medium mb-2"
+              onClick={() => {
+                if (navigator.share) {
+                  navigator.share({
+                    title: 'Room Design',
+                    text: 'Check out my room design!',
+                    url: shareUrl
+                  });
+                } else {
+                  alert('Native sharing is not supported in this browser.');
+                }
+              }}
+            >
+              Share
+            </button>
+            <button onClick={() => setShowShareModal(false)} className="mt-2 px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">Close</button>
+          </div>
+        </div>
+      )}
+      {showEmailModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 shadow-lg w-full max-w-xs flex flex-col items-center">
+            <h3 className="text-lg font-bold mb-4 text-text-primary">Send PDF via Email</h3>
+            <input
+              type="email"
+              placeholder="Receiver's Email"
+              value={receiverEmail}
+              onChange={e => setReceiverEmail(e.target.value)}
+              className="w-full border p-2 rounded mb-3"
+              disabled={otpSent}
+            />
+            {!otpSent ? (
+              <button
+                onClick={handleSendOtp}
+                className="w-full bg-blue-500 text-white py-2 rounded-lg text-center font-medium mb-2"
+                disabled={isSending || !receiverEmail}
+              >
+                {isSending ? 'Sending OTP...' : 'Send OTP'}
+              </button>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  placeholder="Enter OTP"
+                  value={otpInput}
+                  onChange={e => setOtpInput(e.target.value)}
+                  className="w-full border p-2 rounded mb-3"
+                />
+                <button
+                  onClick={handleVerifyOtpAndSendPdf}
+                  className="w-full bg-green-500 text-white py-2 rounded-lg text-center font-medium mb-2"
+                  disabled={isSending || !otpInput}
+                >
+                  {isSending ? 'Verifying...' : 'Verify & Send PDF'}
+                </button>
+              </>
+            )}
+            {emailStatus && <div className="text-sm text-center mt-2 text-gray-700">{emailStatus}</div>}
+            <button onClick={() => setShowEmailModal(false)} className="mt-4 px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm font-medium">Close</button>
+          </div>
+        </div>
       )}
     </div>
   );

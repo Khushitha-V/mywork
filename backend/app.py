@@ -7,16 +7,30 @@ from flask_cors import CORS
 import os
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
-from config import config
 from utils import validate_room_data, save_uploaded_file, allowed_file
-from database import (
-    init_database, create_user, get_user_by_username, get_user_by_id,
-    save_room, get_user_rooms, get_room_by_id, update_room, delete_room
-)
+from database import create_user, get_user_by_username, get_user_by_id, save_room, get_user_rooms, get_room_by_id, update_room, delete_room, save_signup_otp, get_signup_otp, delete_signup_otp
+from bson import ObjectId
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+import random
+import time
+import re
+from dotenv import load_dotenv
+load_dotenv()
+
+# In-memory OTP store: {email: (otp, expiry_time)}
+otp_store = {}
+# In-memory OTP store for signup: {email: (otp, expiry_time)}
+signup_otp_store = {}
+SENDGRID_TEMPLATE_ID = os.environ.get('SENDGRID_TEMPLATE_ID')
+SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
+GMAIL_USER = os.environ.get('GMAIL_USER')
+GMAIL_APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD')
+SENDER_EMAIL = GMAIL_USER  # Use your Gmail as the sender
 
 app = Flask(__name__)
-app.config.from_object(config['development'])
-CORS(app, supports_credentials=True)
+app.secret_key = "your-very-secret-key"  # Use a strong, random value in production!
+CORS(app, supports_credentials=True, origins=["http://localhost:5173"])
 
 # Data storage
 WALLPAPERS_DIR = 'wallpapers'
@@ -24,37 +38,46 @@ WALLPAPERS_DIR = 'wallpapers'
 def ensure_directories():
     os.makedirs(WALLPAPERS_DIR, exist_ok=True)
 
+def convert_objectid(obj):
+    if isinstance(obj, dict):
+        return {k: convert_objectid(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_objectid(i) for i in obj]
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    else:
+        return obj
+
 # Authentication endpoints
 @app.route('/api/auth/signup', methods=['POST'])
 def signup():
-    """Register a new user"""
     data = request.json
     if data is None:
         return jsonify({'error': 'Invalid or missing JSON in request'}), 400
-    # Validate required fields
-    if not data.get('username') or not data.get('email') or not data.get('password'):
-        return jsonify({'error': 'Username, email, and password are required'}), 400
-    # Create new user
-    password_hash = generate_password_hash(data['password'])
-    user = create_user(data['username'], data['email'], password_hash) if data else None
-    if not user:
-        return jsonify({'error': 'Username or email already exists'}), 400
-    # Set session
-    session['user_id'] = user['id']
-    session['username'] = user['username']
-    return jsonify({
-        'message': 'User created successfully',
-        'user': {
-            'id': user['id'],
-            'username': user['username'],
-            'email': user['email']
-        }
-    }), 201
+    username = data.get('username')
+    password = data.get('password')
+    confirm_password = data.get('confirm_password')
+    email = data.get('email')
+    otp = data.get('otp')
+    if not username or not password or not confirm_password or not email or not otp:
+        return jsonify({'error': 'All fields are required'}), 400
+    if password != confirm_password:
+        return jsonify({'error': 'Passwords do not match'}), 400
+    if not is_valid_password(password):
+        return jsonify({'error': 'Password does not meet constraints'}), 400
+    # Check OTP from DB
+    otp_doc = get_signup_otp(email)
+    if not otp_doc or otp_doc['otp'] != otp or time.time() > otp_doc['expiry']:
+        return jsonify({'error': 'Invalid or expired OTP'}), 400
+    # Check if email is already registered
+    if get_user_by_username(email) or get_user_by_id(email):
+        return jsonify({'error': 'Email already registered'}), 400
+    # Create user
+    user = create_user(username, password, email)
+    delete_signup_otp(email)
+    return jsonify({'user': convert_objectid(user)})
 
-@app.route('/api/signup', methods=['POST'])
-def signup_alias():
-    """Alias for /api/auth/signup"""
-    return signup()
+
 
 @app.route('/api/auth/login', methods=['POST'])
 def login():
@@ -131,8 +154,8 @@ def get_rooms():
     auth_check = require_auth()
     if auth_check:
         return auth_check
-    
     rooms = get_user_rooms(session['user_id'])
+    rooms = [convert_objectid(room) for room in rooms]
     return jsonify(rooms)
 
 @app.route('/api/rooms', methods=['POST'])
@@ -161,13 +184,15 @@ def save_room_design():
             'West Wall': '#8a7b94'
         }),
         wallpapers=data.get('wallpapers', {}),
-        wall_canvas_data=data.get('wallCanvasData', {})
+        wall_canvas_data=data.get('wallCanvasData', {}),
+        walls=data.get('walls', {})
     )
     # Get the saved room to return
     room = get_room_by_id(room_id, session['user_id'])
+    room = convert_objectid(room)
     return jsonify({'message': 'Room saved successfully', 'room': room}), 201
 
-@app.route('/api/rooms/<int:room_id>', methods=['PUT'])
+@app.route('/api/rooms/<room_id>', methods=['PUT'])
 def update_room_design(room_id):
     """Update an existing room"""
     auth_check = require_auth()
@@ -193,12 +218,13 @@ def update_room_design(room_id):
     update_room(room_id, session['user_id'], **update_data)
     # Get the updated room
     room = get_room_by_id(room_id, session['user_id'])
+    room = convert_objectid(room)
     if room:
         return jsonify({'message': 'Room updated successfully', 'room': room})
     else:
         return jsonify({'error': 'Room not found or access denied'}), 404
 
-@app.route('/api/rooms/<int:room_id>', methods=['DELETE'])
+@app.route('/api/rooms/<room_id>', methods=['DELETE'])
 def delete_room_design(room_id):
     """Delete a room"""
     auth_check = require_auth()
@@ -208,7 +234,7 @@ def delete_room_design(room_id):
     delete_room(room_id, session['user_id'])
     return jsonify({'message': 'Room deleted successfully'})
 
-@app.route('/api/rooms/<int:room_id>', methods=['GET'])
+@app.route('/api/rooms/<room_id>', methods=['GET'])
 def get_room_design(room_id):
     """Get a specific room"""
     auth_check = require_auth()
@@ -216,6 +242,7 @@ def get_room_design(room_id):
         return auth_check
     
     room = get_room_by_id(room_id, session['user_id'])
+    room = convert_objectid(room)
     
     if room:
         return jsonify(room)
@@ -277,6 +304,23 @@ def list_wallpapers():
     
     return jsonify(wallpapers)
 
+@app.route('/api/upload-image', methods=['POST'])
+def upload_image():
+    """Upload a PNG image and return a public URL"""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    filename = save_uploaded_file(file, WALLPAPERS_DIR, f"shared_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}", allowed_extensions={'png', 'jpg', 'jpeg', 'gif', 'pdf'})
+    if filename:
+        base_url = request.host_url.rstrip('/')
+        return jsonify({
+            'message': 'Image uploaded successfully',
+            'url': f'{base_url}/api/wallpapers/{filename}'
+        })
+    return jsonify({'error': 'Invalid file type'}), 400
+
 @app.route('/api/export/<int:room_id>')
 def export_room(room_id):
     """Export room data as JSON"""
@@ -285,6 +329,7 @@ def export_room(room_id):
         return auth_check
     
     room = get_room_by_id(room_id, session['user_id'])
+    room = convert_objectid(room)
     
     if room:
         return jsonify(room)
@@ -336,7 +381,130 @@ def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
+@app.route('/api/send-otp', methods=['POST'])
+def send_otp():
+    data = request.json
+    if data is None:
+        return jsonify({'error': 'Invalid or missing JSON in request'}), 400
+    receiver = data.get('receiver')
+    if not receiver:
+        return jsonify({'error': 'Receiver email required'}), 400
+    otp = str(random.randint(100000, 999999))
+    expiry = time.time() + 300  # 5 minutes
+    otp_store[receiver] = (otp, expiry)
+    # Send OTP email
+    message = Mail(
+        from_email=SENDER_EMAIL,
+        to_emails=receiver,
+    )
+    message.template_id = SENDGRID_TEMPLATE_ID
+    message.dynamic_template_data = {
+        'otp': otp,
+        'pdf_link': '',  # Not used for OTP
+    }
+    try:
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg.send(message)
+        return jsonify({'message': 'OTP sent'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/verify-otp-and-send-pdf', methods=['POST'])
+def verify_otp_and_send_pdf():
+    data = request.json
+    if data is None:
+        return jsonify({'error': 'Invalid or missing JSON in request'}), 400
+    receiver = data.get('receiver')
+    otp = data.get('otp')
+    pdf_link = data.get('pdf_link')
+    if not receiver or not otp or not pdf_link:
+        return jsonify({'error': 'Missing data'}), 400
+    stored = otp_store.get(receiver)
+    if not stored or stored[0] != otp or time.time() > stored[1]:
+        return jsonify({'error': 'Invalid or expired OTP'}), 400
+    # Send PDF link email
+    message = Mail(
+        from_email=SENDER_EMAIL,
+        to_emails=receiver,
+    )
+    message.template_id = SENDGRID_TEMPLATE_ID
+    message.dynamic_template_data = {
+        'otp': '',
+        'pdf_link': pdf_link,
+    }
+    try:
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg.send(message)
+        del otp_store[receiver]
+        return jsonify({'message': 'PDF link sent'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/send-signup-otp', methods=['POST', 'OPTIONS'])
+def send_signup_otp():
+    if request.method == 'OPTIONS':
+        return '', 200
+    data = request.json
+    if data is None:
+        return jsonify({'error': 'Invalid or missing JSON in request'}), 400
+    email = data.get('email')
+    if not email:
+        return jsonify({'error': 'Email required'}), 400
+    # Check if email is already registered
+    if get_user_by_username(email) or get_user_by_id(email):
+        return jsonify({'error': 'Email already registered'}), 400
+    otp = str(random.randint(100000, 999999))
+    expiry = time.time() + 300  # 5 minutes
+    save_signup_otp(email, otp, expiry)
+    # Send OTP email
+    if SENDGRID_API_KEY and SENDGRID_TEMPLATE_ID:
+        message = Mail(
+            from_email=SENDER_EMAIL,
+            to_emails=email,
+        )
+        message.template_id = SENDGRID_TEMPLATE_ID
+        message.dynamic_template_data = {
+            'otp': otp,
+            'pdf_link': '',
+        }
+        try:
+            sg = SendGridAPIClient(SENDGRID_API_KEY)
+            sg.send(message)
+            return jsonify({'message': 'OTP sent'})
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    else:
+        # Fallback: send plain email using Gmail SMTP
+        import smtplib
+        from email.mime.text import MIMEText
+        if not GMAIL_USER or not GMAIL_APP_PASSWORD or not SENDER_EMAIL:
+            return jsonify({'error': 'Gmail credentials are not set in environment variables.'}), 500
+        try:
+            msg = MIMEText(f"Your OTP for signup is: {otp}")
+            msg['Subject'] = 'Your Signup OTP'
+            msg['From'] = SENDER_EMAIL
+            msg['To'] = email
+            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+                server.sendmail(SENDER_EMAIL, [email], msg.as_string())
+            return jsonify({'message': 'OTP sent (plain email)'})
+        except Exception as e:
+            return jsonify({'error': f'Failed to send OTP email: {str(e)}'}), 500
+
+# Password validation helper
+def is_valid_password(password):
+    if len(password) < 8:
+        return False
+    if not re.search(r'[A-Z]', password):
+        return False
+    if not re.search(r'[a-z]', password):
+        return False
+    if not re.search(r'[0-9]', password):
+        return False
+    if not re.search(r'[^A-Za-z0-9]', password):
+        return False
+    return True
+
 if __name__ == '__main__':
-    ensure_directories()
-    init_database()  # Initialize database on startup
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    ensure_directories() # Initialize database on startup
+    app.run(host='0.0.0.0', port=5000)

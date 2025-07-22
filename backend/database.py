@@ -1,186 +1,116 @@
-
-import sqlite3
 import os
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 from datetime import datetime
-import json
+from dotenv import load_dotenv  # Add missing import
+from werkzeug.security import generate_password_hash
+load_dotenv()
+# MongoDB connection setup 
+MONGODB_URI = os.getenv("MONGODB_URI")
+MONGODB_DBNAME = os.getenv("MONGODB_DBNAME")
+print(MONGODB_URI)
+print(MONGODB_DBNAME)
 
-DATABASE_FILE = 'room_designer.db'
+client = MongoClient(MONGODB_URI)
+if not MONGODB_DBNAME:
+    raise ValueError("MONGODB_DBNAME must be a non-empty string")
+db = client[MONGODB_DBNAME]
 
-def get_db_connection():
-    """Get database connection"""
-    conn = sqlite3.connect(DATABASE_FILE)
-    conn.row_factory = sqlite3.Row  # This enables column access by name
-    return conn
+print(f"✅ Connected to DB: {db.name}")
 
-def init_database():
-    """Initialize database with required tables"""
-    conn = get_db_connection()
-    
-    # Create users table
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create rooms table
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS rooms (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            room_type TEXT NOT NULL,
-            dimensions TEXT NOT NULL,
-            wall_colors TEXT NOT NULL,
-            wallpapers TEXT,
-            wall_canvas_data TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+# USERS
 
-def create_user(username, email, password_hash):
-    """Create a new user"""
-    conn = get_db_connection()
+def create_user(username, password, email):
+    user = {
+        "username": username,
+        "email": email,
+        "password_hash": generate_password_hash(password),
+        "created_at": datetime.now()
+    }
     try:
-        cursor = conn.execute(
-            'INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-            (username, email, password_hash)
-        )
-        user_id = cursor.lastrowid
-        conn.commit()
-        
-        # Return the created user
-        user = conn.execute(
-            'SELECT id, username, email, created_at FROM users WHERE id = ?',
-            (user_id,)
-        ).fetchone()
-        
-        return dict(user) if user else None
-    except sqlite3.IntegrityError:
+        result = db.users.insert_one(user)
+        user["id"] = str(result.inserted_id)
+        del user["password_hash"]  # Don't return the hash
+        return user
+    except Exception as e:
+        print("❌ Error creating user:", e)
         return None
-    finally:
-        conn.close()
+
 
 def get_user_by_username(username):
-    """Get user by username"""
-    conn = get_db_connection()
-    user = conn.execute(
-        'SELECT * FROM users WHERE username = ?',
-        (username,)
-    ).fetchone()
-    conn.close()
-    return dict(user) if user else None
+    user = db.users.find_one({"username": username})
+    if user:
+        user["id"] = str(user["_id"])
+        return user
+    return None
 
 def get_user_by_id(user_id):
-    """Get user by ID"""
-    conn = get_db_connection()
-    user = conn.execute(
-        'SELECT id, username, email, created_at FROM users WHERE id = ?',
-        (user_id,)
-    ).fetchone()
-    conn.close()
-    return dict(user) if user else None
+    try:
+        user = db.users.find_one({"_id": ObjectId(user_id)})
+        if user:
+            user["id"] = str(user["_id"])
+            del user["password_hash"]
+            return user
+    except Exception:
+        pass
+    return None
 
-def save_room(user_id, name, room_type, dimensions, wall_colors, wallpapers=None, wall_canvas_data=None):
-    """Save a room design"""
-    conn = get_db_connection()
-    cursor = conn.execute('''
-        INSERT INTO rooms (user_id, name, room_type, dimensions, wall_colors, wallpapers, wall_canvas_data)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        user_id,
-        name,
-        room_type,
-        json.dumps(dimensions),
-        json.dumps(wall_colors),
-        json.dumps(wallpapers) if wallpapers else None,
-        json.dumps(wall_canvas_data) if wall_canvas_data else None
-    ))
-    room_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return room_id
+# ROOMS
+
+def save_room(user_id, name, room_type, dimensions, wall_colors, wallpapers=None, wall_canvas_data=None, walls=None):
+    room = {
+        "user_id": user_id,
+        "name": name,
+        "room_type": room_type,
+        "dimensions": dimensions,
+        "wall_colors": wall_colors,
+        "wallpapers": wallpapers or {},
+        "wall_canvas_data": wall_canvas_data or {},
+        "walls": walls or {},
+        "created_at": datetime.now(),
+        "updated_at": datetime.now()
+    }
+    result = db.rooms.insert_one(room)
+    return str(result.inserted_id)
 
 def get_user_rooms(user_id):
-    """Get all rooms for a user"""
-    conn = get_db_connection()
-    rooms = conn.execute(
-        'SELECT * FROM rooms WHERE user_id = ? ORDER BY updated_at DESC',
-        (user_id,)
-    ).fetchall()
-    conn.close()
-    
-    # Convert to list of dictionaries and parse JSON fields
+    rooms = db.rooms.find({"user_id": user_id}).sort("updated_at", -1)
     room_list = []
     for room in rooms:
-        room_dict = dict(room)
-        room_dict['dimensions'] = json.loads(room_dict['dimensions'])
-        room_dict['wall_colors'] = json.loads(room_dict['wall_colors'])
-        room_dict['wallpapers'] = json.loads(room_dict['wallpapers']) if room_dict['wallpapers'] else {}
-        room_dict['wall_canvas_data'] = json.loads(room_dict['wall_canvas_data']) if room_dict['wall_canvas_data'] else {}
-        room_list.append(room_dict)
-    
+        room["id"] = str(room["_id"])
+        room_list.append(room)
     return room_list
 
 def get_room_by_id(room_id, user_id):
-    """Get a specific room by ID and user ID"""
-    conn = get_db_connection()
-    room = conn.execute(
-        'SELECT * FROM rooms WHERE id = ? AND user_id = ?',
-        (room_id, user_id)
-    ).fetchone()
-    conn.close()
-    
-    if room:
-        room_dict = dict(room)
-        room_dict['dimensions'] = json.loads(room_dict['dimensions'])
-        room_dict['wall_colors'] = json.loads(room_dict['wall_colors'])
-        room_dict['wallpapers'] = json.loads(room_dict['wallpapers']) if room_dict['wallpapers'] else {}
-        room_dict['wall_canvas_data'] = json.loads(room_dict['wall_canvas_data']) if room_dict['wall_canvas_data'] else {}
-        return room_dict
+    try:
+        room = db.rooms.find_one({"_id": ObjectId(room_id), "user_id": user_id})
+        if room:
+            room["id"] = str(room["_id"])
+            return room
+    except Exception:
+        pass
     return None
 
 def update_room(room_id, user_id, **kwargs):
-    """Update a room"""
-    conn = get_db_connection()
-    
-    # Build the update query dynamically
-    set_clauses = []
-    values = []
-    
-    for key, value in kwargs.items():
-        if key in ['dimensions', 'wall_colors', 'wallpapers', 'wall_canvas_data']:
-            set_clauses.append(f"{key} = ?")
-            values.append(json.dumps(value) if value else None)
-        elif key in ['name', 'room_type']:
-            set_clauses.append(f"{key} = ?")
-            values.append(value)
-    
-    if set_clauses:
-        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
-        values.extend([room_id, user_id])
-        
-        query = f"UPDATE rooms SET {', '.join(set_clauses)} WHERE id = ? AND user_id = ?"
-        conn.execute(query, values)
-        conn.commit()
-    
-    conn.close()
+    update_fields = kwargs.copy()
+    update_fields["updated_at"] = datetime.utcnow()
+    db.rooms.update_one(
+        {"_id": ObjectId(room_id), "user_id": user_id},
+        {"$set": update_fields}
+    )
 
 def delete_room(room_id, user_id):
-    """Delete a room"""
-    conn = get_db_connection()
-    conn.execute(
-        'DELETE FROM rooms WHERE id = ? AND user_id = ?',
-        (room_id, user_id)
+    db.rooms.delete_one({"_id": ObjectId(room_id), "user_id": user_id})
+
+def save_signup_otp(email, otp, expiry):
+    db.signup_otps.update_one(
+        {"email": email},
+        {"$set": {"otp": otp, "expiry": expiry, "created_at": datetime.now()}},
+        upsert=True
     )
-    conn.commit()
-    conn.close()
+
+def get_signup_otp(email):
+    return db.signup_otps.find_one({"email": email})
+
+def delete_signup_otp(email):
+    db.signup_otps.delete_one({"email": email})

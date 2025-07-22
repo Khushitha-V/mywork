@@ -9,8 +9,11 @@ const Frame = ({ x, y, width, height, image, onUpdate, onDelete, bounds, style }
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    onUpdate({ image: url });
+    const reader = new FileReader();
+    reader.onload = e => {
+      onUpdate({ image: e.target.result });
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleDeleteClick = (e) => {

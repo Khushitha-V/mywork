@@ -40,6 +40,10 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
   const [showCropper, setShowCropper] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
   const fileInputRef = useRef();
+  const manageImagesBtnRef = useRef();
+  const [showImagePopup, setShowImagePopup] = useState(false);
+  const [images, setImages] = useState([]);
+  const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0 });
 
   useEffect(() => {
     if (selectedWall && onEditWall2D) {
@@ -50,12 +54,12 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
 
   // Clean up blob URL when file changes
   useEffect(() => {
-    if (wallpaperBlobUrl) {
-      URL.revokeObjectURL(wallpaperBlobUrl);
-    }
     if (wallpaperFile) {
-      const url = URL.createObjectURL(wallpaperFile);
-      setWallpaperBlobUrl(url);
+      const reader = new FileReader();
+      reader.onload = e => {
+        setWallpaperBlobUrl(e.target.result);
+      };
+      reader.readAsDataURL(wallpaperFile);
     } else {
       setWallpaperBlobUrl(null);
     }
@@ -77,9 +81,12 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
     const file = e.target.files[0];
     setWallpaperFile(file);
     if (file) {
-      const url = URL.createObjectURL(file);
-      setImagePreviewUrl(url);
-      setShowCropper(true);
+      const reader = new FileReader();
+      reader.onload = e => {
+        setImagePreviewUrl(e.target.result);
+        setShowCropper(true);
+      };
+      reader.readAsDataURL(file);
     } else {
       setImagePreviewUrl(null);
       setShowCropper(false);
@@ -164,6 +171,20 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleAddImages = (event) => {
+    const files = Array.from(event.target.files);
+    const newImages = files.map(file => ({
+      url: URL.createObjectURL(file),
+      name: file.name,
+      file
+    }));
+    setImages(prev => [...prev, ...newImages]);
+  };
+
+  const handleDeleteImage = (name) => {
+    setImages(prev => prev.filter(img => img.name !== name));
   };
 
   // Find the selected frame
@@ -332,27 +353,6 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
           </div>
         </div>
         
-        {/* Sticker Palette */}
-        <div className="mb-8">
-          <h3 className="text-lg font-semibold text-text-primary mb-4">Sticker Palette</h3>
-          {/* Place your sticker images in the public/images/ folder for them to show up here */}
-          <div className="flex gap-4 flex-wrap">
-            {[
-              '/images/garland1.png', '/images/garland2.png', '/images/marigold1.png', '/images/marigold2.png', '/images/marigold3.png', '/images/marigold4.png',
-               '/images/marigold5.png', '/images/marigold6.png', '/images/sample1.jpg', '/images/sample2.jpg','/images/table1.png','/images/table2.png',
-            ].map((img, idx) => (
-              <div
-                key={img}
-                draggable
-                onDragStart={e => e.dataTransfer.setData('sticker-image-url', img)}
-                className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center shadow cursor-grab border-2 border-blue-400 hover:bg-blue-100 overflow-hidden"
-                title={`Sticker ${idx+1}`}
-              >
-                <img src={img} alt={`Sticker ${idx+1}`} className="object-contain w-full h-full" onError={e => { e.target.style.display = 'none'; e.target.parentNode.textContent = `Sticker ${idx+1}`; }} />
-              </div>
-            ))}
-          </div>
-        </div>
 
         {/* Frame Palette */}
         <div className="mb-8">
@@ -390,6 +390,28 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
             >
               <span className="font-bold text-purple-500">Oval</span>
             </div>
+          </div>
+        </div>
+
+        {/* Sticker Palette */}
+        <div className="mb-8">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">Sticker Palette</h3>
+          {/* Place your sticker images in the public/images/ folder for them to show up here */}
+          <div className="flex gap-4 flex-wrap">
+            {[
+              '/images/garland1.png', '/images/garland2.png', '/images/marigold1.png', '/images/marigold2.png', '/images/marigold3.png', '/images/marigold4.png',
+               '/images/marigold5.png', '/images/marigold6.png', '/images/sample1.jpg', '/images/sample2.jpg','/images/table1.png','/images/table2.png',
+            ].map((img, idx) => (
+              <div
+                key={img}
+                draggable
+                onDragStart={e => e.dataTransfer.setData('sticker-image-url', img)}
+                className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center shadow cursor-grab border-2 border-blue-400 hover:bg-blue-100 overflow-hidden"
+                title={`Sticker ${idx+1}`}
+              >
+                <img src={img} alt={`Sticker ${idx+1}`} className="object-contain w-full h-full" onError={e => { e.target.style.display = 'none'; e.target.parentNode.textContent = `Sticker ${idx+1}`; }} />
+              </div>
+            ))}
           </div>
         </div>
 
@@ -445,7 +467,14 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
             <h3 className="text-lg font-semibold text-text-primary mb-4">Actions</h3>
             <div className="space-y-3">
               <button
-                onClick={onShowImagePopup}
+                ref={manageImagesBtnRef}
+                onClick={() => {
+                  if (manageImagesBtnRef.current) {
+                    const rect = manageImagesBtnRef.current.getBoundingClientRect();
+                    setPopupPosition({ top: rect.bottom + window.scrollY, left: rect.left + window.scrollX });
+                  }
+                  setShowImagePopup(true);
+                }}
                 className="w-full bg-gradient-to-r from-pink-400 to-purple-400 text-white p-3 rounded-xl font-medium hover:from-pink-500 hover:to-purple-500 transition-all shadow-lg text-center"
               >
                 <div className="text-lg mb-1">🖼️</div>
@@ -467,6 +496,43 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
           </div>
         </div>
       </div>
+      {showImagePopup && (
+        <div
+          className="z-50 bg-white rounded-xl shadow-2xl p-6 w-80"
+          style={{
+            position: 'absolute',
+            top: popupPosition.top,
+            left: popupPosition.left
+          }}
+        >
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold">Manage Images</h3>
+            <button onClick={() => setShowImagePopup(false)} className="text-gray-500 hover:text-gray-700">✖</button>
+          </div>
+          <input type="file" multiple accept="image/*" onChange={handleAddImages} className="mb-4" />
+          <div className="grid grid-cols-3 gap-2 mb-2">
+            {images.map(img => (
+              <div key={img.name} className="relative group">
+                <img 
+                  src={img.url} 
+                  alt={img.name} 
+                  className="w-full h-20 object-cover rounded" 
+                  draggable={true}
+                  onDragStart={e => e.dataTransfer.setData('managed-image-url', img.url)}
+                />
+                <button
+                  onClick={() => handleDeleteImage(img.name)}
+                  className="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-80 group-hover:opacity-100"
+                  title="Delete"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          {images.length === 0 && <div className="text-gray-400 text-sm text-center">No images added yet.</div>}
+        </div>
+      )}
     </div>
   );
 };

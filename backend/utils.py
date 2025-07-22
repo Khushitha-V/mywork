@@ -6,8 +6,8 @@ def allowed_file(filename, allowed_extensions):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-def save_uploaded_file(file, upload_folder, prefix=''):
-    if file and allowed_file(file.filename, {'png', 'jpg', 'jpeg', 'gif'}):
+def save_uploaded_file(file, upload_folder, prefix='', allowed_extensions={'png', 'jpg', 'jpeg', 'gif'}):
+    if file and allowed_file(file.filename, allowed_extensions):
         filename = secure_filename(file.filename)
         if prefix:
             filename = f"{prefix}_{filename}"
