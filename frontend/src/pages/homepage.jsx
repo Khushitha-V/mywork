@@ -5,8 +5,10 @@ import RoomCanvas from '../components/RoomCanvas';
 import RoomDimensionModal from '../components/RoomDimensionModal';
 import PreviousRoomsModal from '../components/PreviousRoomsModal';
 import { motion, AnimatePresence } from 'framer-motion';
-import WallCanvas from '../components/WallCanvas';
 import jsPDF from 'jspdf';
+import Canvas from '../components/Canvas';
+import { v4 as uuidv4 } from 'uuid';
+import html2canvas from 'html2canvas';
 
 const DEFAULT_DIMENSIONS = { length: 8, width: 8, height: 3 };
 const DEFAULT_ROOM = 'others';
@@ -638,6 +640,40 @@ const Homepage = ({ user, onLogout }) => {
     setImagePopupPosition(pos || { top: 100, left: 100 });
   };
 
+  // Add state for 2D elements for the current wall
+  const [wallElements, setWallElements] = useState({
+    north: [],
+    south: [],
+    east: [],
+    west: []
+  });
+
+  // Handler to add a new element to the current wall's elements
+  const handleAddElement = (element) => {
+    if (!editingWall) return;
+    const wallKey = getWallKey(editingWall);
+    const defaultX = 50 + Math.random() * 100;
+    const defaultY = 50 + Math.random() * 100;
+    setWallElements(prev => ({
+      ...prev,
+      [wallKey]: [
+        ...((Array.isArray(prev[wallKey]) ? prev[wallKey] : [])),
+        {
+          ...element,
+          id: uuidv4(),
+          x: defaultX,
+          y: defaultY,
+        }
+      ]
+    }));
+  };
+
+  // Helper to get elements for the current wall
+  const getCurrentWallElements = () => wallElements[getWallKey(editingWall)] || [];
+  const setCurrentWallElements = (elements) => {
+    setWallElements(prev => ({ ...prev, [getWallKey(editingWall)]: elements }));
+  };
+
   return (
     <div className="gradient-bg min-h-screen font-sans">
       <Header
@@ -678,6 +714,7 @@ const Homepage = ({ user, onLogout }) => {
           selectedFrameId={selectedFrameId}
           onResizeSelectedFrame={resizeSelectedFrame}
           frames={editingWall && walls[getWallKey(editingWall)] && Array.isArray(walls[getWallKey(editingWall)].frames) ? walls[getWallKey(editingWall)].frames : []}
+          onAddElement={handleAddElement}
         />
         <div className="col-span-12 md:col-span-9 mt-4 md:mt-0">
           <AnimatePresence mode="wait">
@@ -688,12 +725,38 @@ const Homepage = ({ user, onLogout }) => {
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.4, ease: 'easeInOut' }}
-                className="glass-effect rounded-2xl p-8 shadow-xl h-full flex flex-col items-center justify-center border-4 border-accent-blue bg-white"
+                className="glass-effect rounded-2xl p-8 shadow-xl h-full flex flex-col items-center justify-center border-4 border-accent-blue bg-white relative"
                 style={{ minHeight: 400 }}
               >
-                <div className="text-3xl font-bold mb-10 text-text-primary">Customize your {editingWall}</div>
-                {/* Lock Other Frames Toggle */}
-                <div className="flex items-center justify-center mb-4">
+                {/* Top right: title and 3D View button in a flex row */}
+                <div className="absolute top-2 left-1/2 transform -translate-x-1/2 flex items-center gap-4 z-10" style={{ minHeight: '32px' }}>
+                  <div className="text-3xl font-bold text-text-primary whitespace-nowrap">Customize your {editingWall}</div>
+                  <button
+                    className="px-5 py-2 rounded-xl bg-accent-purple text-white font-medium hover:bg-purple-600 transition-all shadow-lg"
+                    onClick={async () => {
+                      // Export the 2D wall as an image and set as 3D wallpaper
+                      if (editingWall) {
+                        const wallKey = getWallKey(editingWall);
+                        const canvasDiv = document.querySelector('.design-canvas');
+                        if (canvasDiv) {
+                          const canvasImage = await html2canvas(canvasDiv, { backgroundColor: null });
+                          const dataUrl = canvasImage.toDataURL();
+                          setWallpapers(prev => ({
+                            ...prev,
+                            [wallKey.charAt(0).toUpperCase() + wallKey.slice(1) + ' Wall']: dataUrl
+                          }));
+                        }
+                      }
+                      setIs2DMode(false);
+                      setSelectedWall("");
+                      setEditingWall(null);
+                    }}
+                  >
+                    3D View
+                  </button>
+                </div>
+                {/* Lock Other Frames Toggle just below the header */}
+                <div className="flex items-center justify-center mb-6">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -705,41 +768,20 @@ const Homepage = ({ user, onLogout }) => {
                   </label>
                 </div>
                 <div className="w-full h-64 flex items-center justify-center">
-                  <WallCanvas
-                    frames={walls[getWallKey(editingWall)].frames}
-                    setFrames={elements => handleSetFrames(editingWall, elements)}
-                    ref={wallCanvasRef}
-                    wallColor={walls[getWallKey(editingWall)].wallColor}
-                    wallpaper={walls[getWallKey(editingWall)].wallpaper}
+                  {/* Render the new Canvas component for 2D editing */}
+                  {(() => {
+                    const wallKey = getWallKey(editingWall);
+                    const wallData = walls[wallKey] || {};
+                    return (
+                  <Canvas
+                    elements={getCurrentWallElements()}
+                    setElements={setCurrentWallElements}
+                    wallpaper={wallData.wallpaper}
+                    wallColor={wallData.wallColor}
                   />
+                    );
+                  })()}
                 </div>
-                <button
-                  className="mt-8 px-6 py-3 rounded-xl bg-accent-purple text-white font-medium hover:bg-purple-600 transition-all shadow-lg"
-                  onClick={() => {
-                    // Export the 2D wall as an image and set as 3D wallpaper
-                    if (editingWall && wallCanvasRef.current) {
-                      const canvas = wallCanvasRef.current;
-                      const dataUrl = canvas.toDataURL();
-                      // Normalize wall name to match RoomCanvas keys
-                      const wallNameMap = {
-                        north: 'North Wall',
-                        south: 'South Wall',
-                        east: 'East Wall',
-                        west: 'West Wall'
-                      };
-                      const wallKey = wallNameMap[getWallKey(editingWall)] || editingWall;
-                      setWallpapers(prev => ({
-                        ...prev,
-                        [wallKey]: dataUrl
-                      }));
-                    }
-                    setIs2DMode(false);
-                    setSelectedWall("");
-                    setEditingWall(null);
-                  }}
-                >
-                  Back to 3D View
-                </button>
               </motion.div>
             ) : (
               <motion.div

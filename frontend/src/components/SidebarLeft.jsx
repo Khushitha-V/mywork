@@ -29,7 +29,7 @@ const colorMap = {
   violet: '#8b5cf6',
 };
 
-const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, selectedWall, setSelectedWall, wallCanvasData, setWallCanvasData, wallColors, wallpapers, onRoomSelect, onShowImagePopup, onSetDimensions, showRoomPopup, setShowRoomPopup, onDownloadSingleWall, selectedFrameId, onResizeSelectedFrame, frames }) => {
+const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, selectedWall, setSelectedWall, wallCanvasData, setWallCanvasData, wallColors, wallpapers, onRoomSelect, onShowImagePopup, onSetDimensions, showRoomPopup, setShowRoomPopup, onDownloadSingleWall, selectedFrameId, onResizeSelectedFrame, frames, onAddElement }) => {
   const [selectedSwatch, setSelectedSwatch] = useState(null);
   const [selectedPosition, setSelectedPosition] = useState('Center');
   const [wallpaperFile, setWallpaperFile] = useState(null);
@@ -249,11 +249,15 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
             <h3 className="text-lg font-semibold text-text-primary mb-4">Wall Options</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-text-secondary mb-2">Choose Wall</label>
+                <label htmlFor="wall-select" className="block text-sm font-medium text-text-secondary mb-2">Choose Wall</label>
                 <select
+                  id="wall-select"
+                  name="wall-select"
                   className="w-full p-3 border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-accent-blue focus:border-transparent transition-all"
                   value={selectedWall}
                   onChange={e => setSelectedWall(e.target.value)}
+                  title="Select wall to customize"
+                  aria-label="Select wall to customize"
                 >
                   <option value="" disabled>Select Wall</option>
                   <option>North Wall</option>
@@ -316,12 +320,17 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
                 <div>
                   <label className="block text-sm font-medium text-text-secondary mb-2">Wallpaper Patterns</label>
                   <div className="flex flex-col gap-2 mt-2">
+                    <label htmlFor="wallpaper-upload" className="block text-sm font-medium text-text-secondary mb-2">Upload Wallpaper Image</label>
                     <input
+                      id="wallpaper-upload"
+                      name="wallpaper-upload"
                       type="file"
                       accept="image/*,.jpg,.jpeg,.png,.gif,.bmp,.webp,.svg"
                       onChange={handleWallpaperFileChange}
                       disabled={!selectedWall}
                       ref={fileInputRef}
+                      title="Upload wallpaper image"
+                      aria-label="Upload wallpaper image"
                     />
                     {imagePreviewUrl && showCropper && (
                       <div className="relative w-full h-64 bg-gray-100 rounded-xl overflow-hidden mb-2">
@@ -360,33 +369,37 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
           <div className="flex gap-4 flex-wrap">
             <div
               draggable
-              onDragStart={e => e.dataTransfer.setData('frameType', 'rectangle')}
+              onDragStart={e => { e.dataTransfer.setData('frameType', 'rectangle'); console.log('DragStart: frameType=rectangle'); }}
               className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center shadow cursor-grab border-2 border-blue-400 hover:bg-blue-100"
               title="Rectangle Frame"
+              onClick={() => onAddElement && onAddElement({ type: 'frame', shape: 'rectangle', width: 140, height: 90 })}
             >
               <span className="font-bold text-blue-500">Rect</span>
             </div>
             <div
               draggable
-              onDragStart={e => e.dataTransfer.setData('frameType', 'square')}
+              onDragStart={e => { e.dataTransfer.setData('frameType', 'square'); console.log('DragStart: frameType=square'); }}
               className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center shadow cursor-grab border-2 border-green-400 hover:bg-green-100"
               title="Square Frame"
+              onClick={() => onAddElement && onAddElement({ type: 'frame', shape: 'square', width: 100, height: 100 })}
             >
               <span className="font-bold text-green-500">Square</span>
             </div>
             <div
               draggable
-              onDragStart={e => e.dataTransfer.setData('frameType', 'circle')}
+              onDragStart={e => { e.dataTransfer.setData('frameType', 'circle'); console.log('DragStart: frameType=circle'); }}
               className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center shadow cursor-grab border-2 border-pink-400 hover:bg-pink-100"
               title="Circle Frame"
+              onClick={() => onAddElement && onAddElement({ type: 'frame', shape: 'circle', width: 100, height: 100 })}
             >
               <span className="font-bold text-pink-500">●</span>
             </div>
             <div
               draggable
-              onDragStart={e => e.dataTransfer.setData('frameType', 'oval')}
+              onDragStart={e => { e.dataTransfer.setData('frameType', 'oval'); console.log('DragStart: frameType=oval'); }}
               className="w-20 h-12 bg-gray-200 rounded-full flex items-center justify-center shadow cursor-grab border-2 border-purple-400 hover:bg-purple-100"
               title="Oval Frame"
+              onClick={() => onAddElement && onAddElement({ type: 'frame', shape: 'oval', width: 140, height: 80 })}
             >
               <span className="font-bold text-purple-500">Oval</span>
             </div>
@@ -408,6 +421,7 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
                 onDragStart={e => e.dataTransfer.setData('sticker-image-url', img)}
                 className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center shadow cursor-grab border-2 border-blue-400 hover:bg-blue-100 overflow-hidden"
                 title={`Sticker ${idx+1}`}
+                onClick={() => onAddElement && onAddElement({ type: 'sticker', content: img, width: 120, height: 120 })}
               >
                 <img src={img} alt={`Sticker ${idx+1}`} className="object-contain w-full h-full" onError={e => { e.target.style.display = 'none'; e.target.parentNode.textContent = `Sticker ${idx+1}`; }} />
               </div>
@@ -509,7 +523,8 @@ const SidebarLeft = ({ onApplyWallColor, onApplyWallWallpaper, onEditWall2D, sel
             <h3 className="text-lg font-bold">Manage Images</h3>
             <button onClick={() => setShowImagePopup(false)} className="text-gray-500 hover:text-gray-700">✖</button>
           </div>
-          <input type="file" multiple accept="image/*" onChange={handleAddImages} className="mb-4" />
+          <label htmlFor="manage-images-upload" className="block text-sm font-medium text-text-secondary mb-2">Add Images</label>
+          <input type="file" id="manage-images-upload" name="manage-images-upload" multiple accept="image/*" onChange={handleAddImages} className="mb-4" title="Add images" aria-label="Add images" />
           <div className="grid grid-cols-3 gap-2 mb-2">
             {images.map(img => (
               <div key={img.name} className="relative group">
